@@ -470,7 +470,11 @@ class Utils:
 
         # ── Yearly dataset (higraph) ─────────────────────────────────────
         if split_type == DatasetType.NoOverlap and not dataset_name in _FLAT_DATASET_NAMES:
-            all_years  = parameters.training_years + parameters.test_years
+            all_years  = parameters.years
+            
+            if not all_years:
+                raise ValueError(f"Years must be specified for yearly datasets (e.g. HiGraph)")
+            
             split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "no_overlap_split.json"
             return Utils.extract_training_validation_and_test(all_years, split_file=split_file)
         
