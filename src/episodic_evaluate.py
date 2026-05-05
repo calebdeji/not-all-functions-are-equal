@@ -47,7 +47,6 @@ from episodic_models import (
     SDLComplexityModel,
     SDLWithoutLearnableParamModel,
     SDLComplexityPriorModel,
-    SDLWithIntraParamModel,
     SDLWithoutStructureModel,
     _scatter_mean,
     _scatter_softmax,
@@ -407,12 +406,6 @@ class OnTheFlyFewShotEvaluator:
             raw_complexity = data.function_features[:, 1].to(node_embs.device)
             return TrainingUtils.generate_sdl_complexity_prior_weights(raw_complexity)
 
-        if isinstance(model, SDLWithIntraParamModel):
-            return TrainingUtils.generate_sdl_intra_param_weights(
-                node_embeddings=node_embs,
-                node_labels=node_labels,
-                lambda_a_val=model.raw_lambda_a,
-            )
 
         if isinstance(model, SDLWithoutStructureModel):
             return TrainingUtils.generate_sdl_without_structure_weights(
@@ -460,13 +453,6 @@ class OnTheFlyFewShotEvaluator:
         if isinstance(model, SDLComplexityPriorModel):
             raw_complexity = data.function_features[:, 1].to(query_node_embs.device)
             return TrainingUtils.generate_sdl_complexity_prior_weights(raw_complexity)
-
-        if isinstance(model, SDLWithIntraParamModel):
-            return TrainingUtils.generate_sdl_intra_param_evaluation_weights(
-                query_node_embeddings=query_node_embs,
-                support_prototypes=node_prototypes,
-                lambda_a_val=model.raw_lambda_a,
-            )
 
         if isinstance(model, SDLWithoutStructureModel):
             return TrainingUtils.generate_sdl_without_structure_evaluation_weights(

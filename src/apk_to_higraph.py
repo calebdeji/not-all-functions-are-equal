@@ -351,135 +351,182 @@ def process_apk(apk_path, apk_hash, verbose=False):
 
 def process_apk_wrapper(args):
     """Wrapper function for multiprocessing"""
-    apk_path, output_dir, verbose = args
-    
+    apk_path, output_dir, verbose, family, year = args
+
     apk_filename = os.path.basename(apk_path)
     apk_hash = os.path.splitext(apk_filename)[0].lower()
-    
+
     output_json_path = os.path.join(output_dir, f"{apk_hash}.json")
 
     if os.path.exists(output_json_path):
         logger.info(f"Output file {output_json_path} already exists. Skipping {apk_path}.")
-        return (True, apk_path) # Consider it a success as it's already processed or to be skipped
+        return (True, apk_path)
 
     try:
-        apk_data = process_apk(apk_path, apk_hash, verbose) # Pass apk_hash
+        apk_data = process_apk(apk_path, apk_hash, verbose)
         if apk_data:
+            apk_data["family"] = family
+            if year is not None:
+                apk_data["year"] = year
             with open(output_json_path, 'w') as f:
                 json.dump(apk_data, f)
             return (True, apk_path)
         return (False, apk_path)
     except Exception as e:
-        logger.error(f"Error processing {apk_path} in worker: {str(e)}") # More specific error logging
+        logger.error(f"Error processing {apk_path} in worker: {str(e)}")
         return (False, f"{apk_path}: {str(e)}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate hierarchical graph data (FCG & CFGs) from APKs using Androguard, categorized by year and type (Benign/Malware).")
-    parser.add_argument("years", nargs='+', help="One or more years of the APKs to process (e.g., 2022 or 2012 2013 2014).")
-    parser.add_argument("--base_data_dir", default="/projects/hchen5_proj/data/Androzoo/",
-                        help="Base directory containing 'Benign' and 'Malware_4' subdirectories with year folders for APKs.")
-    parser.add_argument("--base_json_dir", default="/projects/hchen5_proj/json/",
-                        help="Base directory where output JSONs will be stored, mirroring the data structure.")
+    import csv as _csv
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from utils import Utils, _FLAT_DATASET_NAMES
+
+    parser = argparse.ArgumentParser(
+        description="Generate hierarchical graph data (FCG & CFGs) from APKs using Androguard."
+    )
+    parser.add_argument("--dataset", default="higraph",
+                        choices=["higraph", "maldroid", "kronodroid"],
+                        help="Dataset to process (default: higraph).")
+    parser.add_argument("--years", nargs="+", default=None,
+                        help="HiGraph only — one or more years to process (default: all available).")
+    parser.add_argument("--apk_root", default=None,
+                        help="Root directory of raw APKs. Defaults to raw_format/{dataset}.")
+    parser.add_argument("--out_dir", default=None,
+                        help="Output directory for JSON files. Defaults to dataset/{dataset}/graph/raw_data/higraph_base_data (higraph) or dataset/{dataset}/graph/raw (flat).")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
-    parser.add_argument("--limit", "-l", type=int, help="Limit the number of APKs to process per category (Benign/Malware_4)")
+    parser.add_argument("--limit", "-l", type=int, help="Limit the number of APKs to process")
     parser.add_argument("--processes", "-p", type=int, default=mp.cpu_count(),
                         help=f"Number of processes to use (default: {mp.cpu_count()})")
     parser.add_argument("--no-extension", action="store_true",
-                        help="Process all files regardless of extension (e.g. files named as sha256.md5 without .apk)")
-    
+                        help="Process all files regardless of extension")
+
     args = parser.parse_args()
 
     if args.verbose:
         logger.setLevel(logging.DEBUG)
-        set_log(level="DEBUG") # Also set Androguard's log level if verbose
+        set_log(level="DEBUG")
     else:
         logger.setLevel(logging.INFO)
         set_log(level="ERROR")
 
+    flat = args.dataset in _FLAT_DATASET_NAMES
+    apk_root = args.apk_root or Utils.get_raw_apk_root(args.dataset)
+    truth_dir = Utils.get_refined_truth_root(args.dataset)
+    graph_root = Utils.get_graph_root(args.dataset)
 
-    # categories = ["Benign", "Malware_15"]
-    categories = ["Malware_15"]
-    all_tasks_for_pool = [] # Renamed and will accumulate tasks from all years
-    total_apks_found_across_years = 0
+    if args.out_dir:
+        base_out = args.out_dir
+    else:
+        base_out = graph_root  # flat: {base_out}/raw/  higraph: {base_out}/{year}/raw/
 
-    for current_year_str in args.years:
-        logger.info(f"--- Preparing year: {current_year_str} ---")
-        apks_found_this_year = 0
-        for category in categories:
-            apk_input_dir_for_category_year = os.path.join(args.base_data_dir, 'Malware', current_year_str)
-            output_dir_for_category_year = os.path.join(args.base_json_dir, category, current_year_str)
+    all_tasks = []
 
-            if not os.path.isdir(apk_input_dir_for_category_year):
-                logger.warning(f"Input directory '{apk_input_dir_for_category_year}' not found. Skipping this category for year {current_year_str}.")
+    if flat:
+        # ── Flat dataset (maldroid, kronodroid) ──────────────────────────────
+        csv_path = os.path.join(truth_dir, f"labelled_samples_with_family_{args.dataset}_apks.csv")
+        if not os.path.exists(csv_path):
+            logger.error(f"CSV not found: {csv_path}")
+            return
+
+        hash_to_family = {}
+        with open(csv_path, newline="") as f:
+            for row in _csv.DictReader(f):
+                hash_to_family[row["hash"].strip().lower()] = row["family"].strip()
+
+        out_dir = os.path.join(base_out, "raw")
+        os.makedirs(out_dir, exist_ok=True)
+
+        apk_files = [
+            f for f in os.listdir(apk_root)
+            if args.no_extension or f.endswith(".apk")
+        ]
+        if args.limit:
+            apk_files = apk_files[:args.limit]
+
+        for filename in apk_files:
+            sha256 = os.path.splitext(filename)[0].lower()
+            family = hash_to_family.get(sha256)
+            if family is None:
+                logger.warning(f"Hash not in CSV, skipping: {sha256}")
+                continue
+            all_tasks.append((os.path.join(apk_root, filename), out_dir, args.verbose, family, None))
+
+        logger.info(f"[{args.dataset}] {len(all_tasks)} APKs to process → {out_dir}")
+
+    else:
+        # ── HiGraph (yearly) ─────────────────────────────────────────────────
+        import glob as _glob
+        if args.years:
+            years = args.years
+        else:
+            csv_pattern = os.path.join(truth_dir, "labelled_samples_with_family_*.csv")
+            years = sorted(
+                os.path.basename(p).replace("labelled_samples_with_family_", "").replace(".csv", "")
+                for p in _glob.glob(csv_pattern)
+            )
+
+        total = 0
+        for year in years:
+            csv_path = os.path.join(truth_dir, f"labelled_samples_with_family_{year}.csv")
+            if not os.path.exists(csv_path):
+                logger.warning(f"CSV not found for year {year}, skipping.")
                 continue
 
-            if not os.path.exists(output_dir_for_category_year):
-                try:
-                    os.makedirs(output_dir_for_category_year)
-                    logger.info(f"Created output directory: {output_dir_for_category_year}")
-                except Exception as e:
-                    logger.error(f"Failed to create output directory '{output_dir_for_category_year}': {str(e)}. Skipping this category for year {current_year_str}.")
-                    continue 
-            elif not os.path.isdir(output_dir_for_category_year):
-                logger.error(f"Output path '{output_dir_for_category_year}' exists but is not a directory. Skipping this category for year {current_year_str}.")
+            hash_to_family = {}
+            with open(csv_path, newline="") as f:
+                for row in _csv.DictReader(f):
+                    hash_to_family[row["hash"].strip().lower()] = row["family"].strip()
+
+            apk_dir = os.path.join(apk_root, year)
+            out_dir  = os.path.join(base_out, year, "raw")
+
+            if not os.path.isdir(apk_dir):
+                logger.warning(f"APK directory not found: {apk_dir}, skipping year {year}.")
                 continue
 
-            apk_files_in_category_year = [
-                f for f in os.listdir(apk_input_dir_for_category_year)
+            os.makedirs(out_dir, exist_ok=True)
+
+            apk_files = [
+                f for f in os.listdir(apk_dir)
                 if args.no_extension or f.endswith(".apk")
             ]
+            if args.limit:
+                apk_files = apk_files[:args.limit]
 
-            if not apk_files_in_category_year:
-                logger.info(f"No APK files found in '{apk_input_dir_for_category_year}'.")
-                continue
-            
-            if args.limit and args.limit > 0:
-                apk_files_in_category_year = apk_files_in_category_year[:args.limit]
-            
-            logger.info(f"Found {len(apk_files_in_category_year)} APK file(s) in '{apk_input_dir_for_category_year}' to process.")
-            
-            for filename in apk_files_in_category_year:
-                apk_path = os.path.join(apk_input_dir_for_category_year, filename)
-                all_tasks_for_pool.append((apk_path, output_dir_for_category_year, args.verbose))
-                apks_found_this_year += 1
-        
-        if apks_found_this_year > 0:
-            logger.info(f"Collected {apks_found_this_year} APK(s) for year {current_year_str}.")
-            total_apks_found_across_years += apks_found_this_year
-        else:
-            logger.info(f"No APKs collected for processing for year {current_year_str}.")
+            for filename in apk_files:
+                sha256 = os.path.splitext(filename)[0].lower()
+                family = hash_to_family.get(sha256)
+                if family is None:
+                    logger.warning(f"Hash not in CSV, skipping: {sha256}")
+                    continue
+                all_tasks.append((os.path.join(apk_dir, filename), out_dir, args.verbose, family, year))
+                total += 1
 
+            logger.info(f"  [{year}] {len(apk_files)} APKs queued → {out_dir}")
 
-    if not all_tasks_for_pool:
-        logger.error(f"No APKs found to process for the specified year(s): {', '.join(args.years)}. Exiting.")
+        logger.info(f"Total APKs to process: {total}")
+
+    if not all_tasks:
+        logger.error("No APKs found to process. Exiting.")
         return
-        
-    logger.info(f"Total {total_apks_found_across_years} APK file(s) to process from all categories for year(s) {', '.join(args.years)} using {args.processes} processes.")
-    
+
     successful_count = 0
     failed_apks = []
 
-    # Process APKs in parallel with progress bar
     with mp.Pool(processes=args.processes) as pool:
-        # Use tqdm for progress monitoring
-        with tqdm(total=len(all_tasks_for_pool), desc="Processing APKs") as pbar:
-            for success, result in pool.imap_unordered(process_apk_wrapper, all_tasks_for_pool):
+        with tqdm(total=len(all_tasks), desc="Processing APKs") as pbar:
+            for success, result in pool.imap_unordered(process_apk_wrapper, all_tasks):
                 if success:
                     successful_count += 1
                 else:
-                    logger.error(f"Failed to process {result}")
+                    logger.error(f"Failed: {result}")
                     failed_apks.append(result)
                 pbar.update(1)
 
-    if successful_count == 0 and total_apks_found_across_years > 0 :
-        logger.error(f"No APKs were successfully processed out of {total_apks_found_across_years} found.")
-    elif successful_count > 0:
-        logger.info(f"Successfully processed {successful_count}/{total_apks_found_across_years} APK(s) for year(s) {', '.join(args.years)}.")
-    
+    logger.info(f"Done — {successful_count}/{len(all_tasks)} succeeded.")
     if failed_apks:
-        logger.warning(f"List of failed APKs/errors: {failed_apks}")
-
-    logger.info(f"JSON files saved to subdirectories under {args.base_json_dir}")
+        logger.warning(f"Failed APKs: {failed_apks}")
 
 if __name__ == '__main__':
     main()

@@ -145,14 +145,20 @@ pip install -r requirements.txt
 Parses each APK into a JSON graph file using Androguard:
 
 ```bash
-# HiGraph
+# HiGraph (all years)
 python src/apk_to_higraph.py
 
-# MalDroid / KronoDroid (flat)
+# HiGraph (specific years)
+python src/apk_to_higraph.py --years 2019 2020 2021
+
+# MalDroid / KronoDroid
 python src/apk_to_higraph.py --dataset maldroid
+python src/apk_to_higraph.py --dataset kronodroid
 ```
 
-Output: `dataset/{name}/graph/raw_data/...`
+Output:
+- HiGraph: `dataset/higraph/graph/{year}/raw/{sha256}.json`
+- Flat: `dataset/{name}/graph/raw/{sha256}.json`
 
 ### 2. Generate Family Splits (required before any training)
 
