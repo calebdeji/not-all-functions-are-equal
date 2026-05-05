@@ -66,6 +66,7 @@ class ExperimentConfig:
             "backbone_pretrain_instance_level_projection_temperature": 0.1,
             "backbone_pretrain_set_level_projection_temperature": 0.1,
             'id': 'trial_config_v3',
+            "years": ["2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021"]
         }
 
     @staticmethod
@@ -77,9 +78,7 @@ class ExperimentConfig:
             **params
         )
 
-    @staticmethod
-    def get_trial_config_v3() -> ModelParameters:
-        return ExperimentConfig._get_trial_config_v3_variant('higraph', DatasetType.Default)
+    
 
     @staticmethod
     def get_trial_config_v3_higraph_no_overlap() -> ModelParameters:

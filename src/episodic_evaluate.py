@@ -863,6 +863,7 @@ def run_unified_evaluation(
         _, _, test_ds = Utils.get_splits(params)
 
         from torch.utils.data import ConcatDataset
+        
         inner = test_ds.dataset if isinstance(test_ds, Subset) else test_ds
         if isinstance(inner, ConcatDataset):
             all_labels = torch.cat([ds.get_labels() for ds in inner.datasets])
@@ -891,8 +892,8 @@ def run_unified_evaluation(
             idx_to_family=_build_idx_to_family(test_ds),
         )
 
-    else:  # Default
-        logger.error(f'Dataset split type: {params.dataset_split_type.value} — not valid')
+    else:
+        logger.error(f'Dataset split type: {params.dataset_split_type.value} — not supported')
 
         
 
@@ -965,8 +966,7 @@ def main():
         dropout_value=params.dropout,
     ).to(device)
 
-    # SDL dim variants can run episode-trained even without a global checkpoint
-    _SDL_DIM_VARIANTS = {'sdl_dim_degree', 'sdl_dim_complexity'}
+
 
     # Load all available episodic head variants
     episodic_models = {}
@@ -975,13 +975,8 @@ def main():
     for variant in REGISTRY.keys():
         model_path = Utils.get_episodic_model_path(params, variant, args.freeze_backbone)
         if not os.path.exists(model_path):
-            if variant in _SDL_DIM_VARIANTS and not args.skip_episode_train:
-                model = create_model(variant, backbone, fcg_dim=params.final_channels).to(device)
-                model.eval()
-                episode_train_only[variant] = model
-                logger.info(f'  {variant} — no checkpoint, registered for episode-trained eval only')
-            else:
-                logger.info(f'  Skipping {variant} — no checkpoint at {model_path}')
+            
+            logger.info(f'  Skipping {variant} — no checkpoint at {model_path}')
             continue
         model = create_model(variant, backbone, fcg_dim=params.final_channels).to(device)
         model.load_state_dict(torch.load(model_path, map_location=device))
@@ -1113,13 +1108,9 @@ def main():
                + (["androfim"] if androfim_backbone is not None else []) \
                + ([f"famcf_{ft}" for ft in (famcf_encoders or {})])
     logger.info(f'\nModels to evaluate: {list(episodic_models.keys()) + standalone}')
-    if episode_train_only:
-        logger.info(f'Episode-train-only (no checkpoint): {list(episode_train_only.keys())}')
+    
 
-    if args.skip_episode_train:
-        logger.info('SDL inner-loop: skipped (--skip_episode_train)')
-    else:
-        logger.info(f'SDL inner-loop: {args.n_inner_steps} steps, lr={args.inner_lr}')
+    
 
     _, tracker = run_unified_evaluation(
         episodic_models=episodic_models,
@@ -1131,10 +1122,6 @@ def main():
         n_shots=args.n_shots,
         n_query=args.n_query,
         n_episodes=args.n_episodes,
-        n_inner_steps=args.n_inner_steps,
-        inner_lr=args.inner_lr,
-        episode_train_only=episode_train_only,
-        skip_episode_train=args.skip_episode_train,
         pretrained_backbones=pretrained_backbones,
         androfim_backbone=androfim_backbone,
         hash_to_path=hash_to_path,

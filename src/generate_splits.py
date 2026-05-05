@@ -5,7 +5,7 @@ Generates and saves the family train/val/test split for a given config,
 without running any training.  The split strategy is read from the config.
 
 Splits are saved to:
-  dataset_config_split/higraph/{config_id}/no_overlap_split.json
+  dataset_config_split/higraph/{config_id}/split.json
   dataset_config_split/maldroid/{config_id}/split.json
   dataset_config_split/kronodroid/{config_id}/split.json
   

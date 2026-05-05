@@ -97,35 +97,16 @@ def load_model(dino_ckpt: str, n_families: int, dropout: float) -> AndroFIMFinet
 
 # ─── Split helper ─────────────────────────────────────────────────────────────
 
-def get_or_create_split(manifest_path: Path, split_file: Path,
-                        seed: int, ratios: List[float]) -> dict:
-    """Load an existing no_overlap split JSON, or generate and save a new one."""
-    if split_file.exists():
-        with open(split_file) as f:
-            return json.load(f)
-
-    df = pd.read_csv(manifest_path)
-    families = sorted(df["family"].unique().tolist())
-    rng = random.Random(seed)
-    rng.shuffle(families)
-
-    n = len(families)
-    n_base = int(n * ratios[0])
-    n_val  = int(n * ratios[1])
-
-    split = {
-        "split_type": "no_overlap",
-        "seed":   seed,
-        "ratios": ratios,
-        "base":   families[:n_base],
-        "val":    families[n_base:n_base + n_val],
-        "novel":  families[n_base + n_val:],
-    }
-    split_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(split_file, "w") as f:
-        json.dump(split, f, indent=2)
-    print(f"Split saved -> {split_file}")
-    return split
+def load_split(manifest_path: Path, split_file: Path,
+               seed: int, ratios: List[float]) -> dict:
+    """Load the split JSON produced by generate_splits.py."""
+    if not split_file.exists():
+        raise FileNotFoundError(
+            f"Split file not found: {split_file}\n"
+            f"Run generate_splits.py first to generate the split."
+        )
+    with open(split_file) as f:
+        return json.load(f)
 
 
 # ─── Dataset ──────────────────────────────────────────────────────────────────
@@ -277,13 +258,13 @@ def main():
     if args.dataset in _FLAT_DATASET_NAMES:
         split_file = config_dir / "split.json"
     else:
-        split_file = config_dir / f"{split_type}_split.json"
+        split_file = config_dir / "split.json"
 
     
 
     flat = args.dataset in _FLAT_DATASET_NAMES
 
-    split = get_or_create_split(manifest, split_file, args.split_seed, args.split_ratios)
+    split = load_split(manifest, split_file, args.split_seed, args.split_ratios)
     logger.info(f"no_overlap split: base={len(split['base'])} families, "
                 f"val={len(split['val'])}, novel={len(split['novel'])}")
     dataset      = AndroFIMBaseDataset.from_families(manifest, split["base"], img_root=img_root, flat=flat)

@@ -457,7 +457,7 @@ class Utils:
 
         # ── Flat datasets (no yearly structure) ─────────────────────────
         if dataset_name in _FLAT_DATASET_NAMES:
-            if split_type == DatasetType.Default:
+            if split_type != DatasetType.NoOverlap:
                 raise ValueError(
                     f"dataset_split_type={split_type} is not valid for dataset "
                     f"'{dataset_name}' which has no yearly data. "
@@ -475,7 +475,7 @@ class Utils:
             if not all_years:
                 raise ValueError(f"Years must be specified for yearly datasets (e.g. HiGraph)")
             
-            split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "no_overlap_split.json"
+            split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "split.json"
             return Utils.extract_training_validation_and_test(all_years, split_file=split_file)
         
         raise ValueError(f"Unsupported dataset_split_type '{split_type}' for dataset '{dataset_name}'")
