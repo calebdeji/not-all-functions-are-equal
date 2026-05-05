@@ -1,0 +1,24 @@
+/hi_graph
+/.venv
+/local
+/src/__pycache__
+/models
+/.idea
+.env
+/prev
+/maldroid_graph
+/drebin_graph
+/raw
+/old_models
+/drafts
+/baseline_papers
+/paper_draft
+/referenced papers
+/processed_data/famcf_features
+/processed_data/maldroid
+/dataset
+/raw_format
+/old_models
+/famcf_features
+/trained_models
+/_backup
