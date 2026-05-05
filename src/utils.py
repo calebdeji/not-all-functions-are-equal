@@ -457,7 +457,7 @@ class Utils:
 
         # ── Flat datasets (no yearly structure) ─────────────────────────
         if dataset_name in _FLAT_DATASET_NAMES:
-            if split_type == DatasetType.Default:
+            if split_type != DatasetType.NoOverlap:
                 raise ValueError(
                     f"dataset_split_type={split_type} is not valid for dataset "
                     f"'{dataset_name}' which has no yearly data. "
