@@ -36,7 +36,6 @@ from episodic_models import (
     SDLComplexityModel,
     SDLWithoutLearnableParamModel,
     SDLComplexityPriorModel,
-    SDLWithIntraParamModel,
     SDLWithoutStructureModel,
     _scatter_mean,
     _scatter_add,
@@ -195,12 +194,6 @@ def compute_support_weights(model, node_embs, node_labels, data, fcg_batch):
         raw_complexity = data.function_features[:, 1].to(node_embs.device)
         return TrainingUtils.generate_sdl_complexity_prior_weights(raw_complexity)
 
-    if isinstance(model, SDLWithIntraParamModel):
-        return TrainingUtils.generate_sdl_intra_param_weights(
-            node_embeddings=node_embs,
-            node_labels=node_labels,
-            lambda_a_val=model.raw_lambda_a,
-        )
 
     if isinstance(model, SDLWithoutStructureModel):
         return TrainingUtils.generate_sdl_without_structure_weights(
@@ -248,13 +241,6 @@ def compute_query_weights(model, query_node_embs, node_prototypes, data):
     if isinstance(model, SDLComplexityPriorModel):
         raw_complexity = data.function_features[:, 1].to(query_node_embs.device)
         return TrainingUtils.generate_sdl_complexity_prior_weights(raw_complexity)
-
-    if isinstance(model, SDLWithIntraParamModel):
-        return TrainingUtils.generate_sdl_intra_param_evaluation_weights(
-            query_node_embeddings=query_node_embs,
-            support_prototypes=node_prototypes,
-            lambda_a_val=model.raw_lambda_a,
-        )
 
     if isinstance(model, SDLWithoutStructureModel):
         return TrainingUtils.generate_sdl_without_structure_evaluation_weights(
@@ -559,8 +545,7 @@ def episodic_finetune(
 
         if isinstance(model, (SDLDegreeModel, SDLComplexityModel, SDLWithoutStructureModel)):
             logger.info(f'  λa={model.raw_lambda_a.item():.4f}  λb={model.raw_lambda_b.item():.4f}')
-        elif isinstance(model, SDLWithIntraParamModel):
-            logger.info(f'  λa={model.raw_lambda_a.item():.4f}')
+        
 
         # ---- Epoch profiling summary ----
         avg_wall = sum(epoch_wall_times) / len(epoch_wall_times) if epoch_wall_times else 0.0
@@ -657,7 +642,7 @@ def main():
     logger = Utils.setup_logger(f'episodic_train_{args.variant}_{frozen_str}_{params.dataset_split_type.value}', log_path)
 
     logger.info(f'Config: {params.id}  Variant: {args.variant} Device: {device}')
-    logger.info(f'Seed: {args.seed}  Training years: {params.training_years}')
+    logger.info(f'Seed: {args.seed}')
     logger.info(f'Freeze backbone: {args.freeze_backbone}')
     logger.info(f'Dataset split type: {params.dataset_split_type.value}')
 
