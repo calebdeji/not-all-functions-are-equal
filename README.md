@@ -157,7 +157,7 @@ python src/apk_to_higraph.py --dataset kronodroid
 ```
 
 Output:
-- HiGraph: `dataset/higraph/graph/raw_data/higraph_base_data/{year}/{sha256}.json`
+- HiGraph: `dataset/higraph/graph/{year}/raw/{sha256}.json`
 - Flat: `dataset/{name}/graph/raw/{sha256}.json`
 
 ### 2. Generate Family Splits (required before any training)

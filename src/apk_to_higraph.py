@@ -417,10 +417,8 @@ def main():
 
     if args.out_dir:
         base_out = args.out_dir
-    elif flat:
-        base_out = os.path.join(graph_root, "raw")
     else:
-        base_out = os.path.join(graph_root, "raw_data", "higraph_base_data")
+        base_out = graph_root  # flat: {base_out}/raw/  higraph: {base_out}/{year}/raw/
 
     all_tasks = []
 
@@ -436,7 +434,8 @@ def main():
             for row in _csv.DictReader(f):
                 hash_to_family[row["hash"].strip().lower()] = row["family"].strip()
 
-        os.makedirs(base_out, exist_ok=True)
+        out_dir = os.path.join(base_out, "raw")
+        os.makedirs(out_dir, exist_ok=True)
 
         apk_files = [
             f for f in os.listdir(apk_root)
@@ -451,9 +450,9 @@ def main():
             if family is None:
                 logger.warning(f"Hash not in CSV, skipping: {sha256}")
                 continue
-            all_tasks.append((os.path.join(apk_root, filename), base_out, args.verbose, family, None))
+            all_tasks.append((os.path.join(apk_root, filename), out_dir, args.verbose, family, None))
 
-        logger.info(f"[{args.dataset}] {len(all_tasks)} APKs to process → {base_out}")
+        logger.info(f"[{args.dataset}] {len(all_tasks)} APKs to process → {out_dir}")
 
     else:
         # ── HiGraph (yearly) ─────────────────────────────────────────────────
@@ -480,7 +479,7 @@ def main():
                     hash_to_family[row["hash"].strip().lower()] = row["family"].strip()
 
             apk_dir = os.path.join(apk_root, year)
-            out_dir  = os.path.join(base_out, year)
+            out_dir  = os.path.join(base_out, year, "raw")
 
             if not os.path.isdir(apk_dir):
                 logger.warning(f"APK directory not found: {apk_dir}, skipping year {year}.")
