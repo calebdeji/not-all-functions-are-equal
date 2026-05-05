@@ -10,7 +10,6 @@ from torch.utils.data import  WeightedRandomSampler
 from enum import Enum
 
 class DatasetType(Enum):
-    Default = 'default'
     NoOverlap = 'no_overlap'
 
 
@@ -34,10 +33,8 @@ class ModelParameters:
     backbone_set_level_features_top_k : int
     backbone_pretrain_instance_level_projection_temperature : float
     backbone_pretrain_set_level_projection_temperature : float
-    training_years : list[str]
-    test_years : list[str]
 
-    dataset_split_type: DatasetType = DatasetType.Default
+    dataset_split_type: DatasetType = DatasetType.NoOverlap
     dataset_name: str = 'higraph'
 
 
@@ -57,7 +54,7 @@ class ModelParameters:
     episodic_patience: int = 6
 
 
-_FLAT_DATASET_NAMES = {'maldroid', 'drebin', 'kronodroid'}
+_FLAT_DATASET_NAMES = {'maldroid', 'kronodroid'}
 
 
 class Utils:
@@ -72,7 +69,7 @@ class Utils:
         Returns the PyG dataset root for the given dataset name.
         Edit this function if the dataset layout changes.
 
-        dataset: 'higraph' | 'maldroid' | 'drebin'
+        dataset: 'higraph' | 'maldroid'
         """
         return os.path.join(Utils.get_project_root(), 'dataset', dataset, 'graph')
 
@@ -111,7 +108,7 @@ class Utils:
         Returns the dataset_refined_truth directory for the given dataset name.
         Edit this function if the dataset layout changes.
 
-        dataset: 'higraph' | 'maldroid' | 'drebin'
+        dataset: 'higraph' | 'maldroid' 
         """
         return os.path.join(Utils.get_project_root(), 'dataset_refined_truth', dataset)
 
@@ -443,9 +440,6 @@ class Utils:
 
     @staticmethod
     def apply_dataset_split_type(config: ModelParameters, split_type_str: str) -> None:
-        """Normalize 'temporal' → 'default' and set config.dataset_split_type."""
-        if split_type_str == 'temporal':
-            split_type_str = 'default'
         config.dataset_split_type = DatasetType(split_type_str)
 
     @staticmethod
@@ -453,22 +447,19 @@ class Utils:
         """
         Returns (train_ds, val_ds, test_ds) based on dataset_name + dataset_split_type.
 
-        Flat datasets (maldroid, drebin) have no temporal structure; only
-        'no_overlap' is supported.  Raises ValueError for 'default'/'temporal'.
+        Flat datasets (maldroid, drebin) have no yearly structure; only
+        'no_overlap' is supported.
 
-        Temporal dataset (higraph):
-            default/temporal — training_years only, disjoint family split.
-            no_overlap       — all years, disjoint family split.
         """
         split_type   = parameters.dataset_split_type
         dataset_name = parameters.dataset_name
 
-        # ── Flat datasets (no temporal structure) ─────────────────────────
+        # ── Flat datasets (no yearly structure) ─────────────────────────
         if dataset_name in _FLAT_DATASET_NAMES:
             if split_type == DatasetType.Default:
                 raise ValueError(
-                    f"dataset_split_type='default'/'temporal' is not valid for dataset "
-                    f"'{dataset_name}' which has no temporal data. "
+                    f"dataset_split_type={split_type} is not valid for dataset "
+                    f"'{dataset_name}' which has no yearly data. "
                     f"Use 'no_overlap' instead."
                 )
             from parse_dataset import FlatGraph
@@ -476,14 +467,13 @@ class Utils:
             split_file = Path(Utils.get_project_root()) / "dataset_config_split" / dataset_name / parameters.id / "split.json"
             return Utils.extract_flat_dataset_splits(ds, split_file=split_file)
 
-        # ── Temporal dataset (higraph) ─────────────────────────────────────
-        if split_type == DatasetType.NoOverlap:
+        # ── Yearly dataset (higraph) ─────────────────────────────────────
+        if split_type == DatasetType.NoOverlap and not dataset_name in _FLAT_DATASET_NAMES:
             all_years  = parameters.training_years + parameters.test_years
             split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "no_overlap_split.json"
             return Utils.extract_training_validation_and_test(all_years, split_file=split_file)
-        # Default (temporal split)
-        split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "default_split.json"
-        return Utils.extract_training_validation_and_test(parameters.training_years, split_file=split_file)
+        
+        raise ValueError(f"Unsupported dataset_split_type '{split_type}' for dataset '{dataset_name}'")
 
     @staticmethod
     def get_models_destination(parameters: ModelParameters):
