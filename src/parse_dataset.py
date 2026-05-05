@@ -52,7 +52,7 @@ class HiGraphDataset(Dataset):
         super().__init__(r, transform, pre_transform, pre_filter)
 
     def _get_csv_data_frame(self):
-        csv_file_name = f"higraph_labelled_with_family_index_{self.year}.csv"
+        csv_file_name = f"labelled_samples_with_family_{self.year}.csv"
         print(f"{csv_file_name} and year {self.year}")
         csv_file_path = os.path.join(Utils.get_project_root(), 'dataset_refined_truth', 'higraph', csv_file_name)
 
