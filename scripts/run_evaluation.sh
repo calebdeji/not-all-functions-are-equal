@@ -12,6 +12,6 @@ for CONFIG in "${CONFIGS[@]}"; do
     python src/episodic_evaluate.py \
         --config "$CONFIG" \
         --n_query 15 --n_episodes 500 \
-        --skip_episode_train --n_shots 1 5 \
+        --n_shots 1 5 \
         --export_weights_dir metric_data_todo_run/
 done
