@@ -230,7 +230,7 @@ def _load_pkl_backend(data_dir: str, feature_type: str, logger,
             pd.concat(dfs, ignore_index=True).to_csv(samples_csv, index=False)
             logger.info(f"Generated {samples_csv} from {len(year_csvs)} year CSVs")
     else:
-        samples_csv = os.path.join(truth_dir, "selected_samples.csv")
+        samples_csv = os.path.join(truth_dir, f"labelled_samples_with_family_{dataset_name}_apks.csv")
 
     # ── Load family split ─────────────────────────────────────────────────────
     if split_json and os.path.exists(split_json):
