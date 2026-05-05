@@ -213,7 +213,7 @@ def _load_pkl_backend(data_dir: str, feature_type: str, logger,
         samples_csv = os.path.join(truth_dir, "famcf_samples.csv")
         if not os.path.exists(samples_csv):
             year_csvs = [
-                os.path.join(truth_dir, f"higraph_labelled_with_family_index_{y}.csv")
+                os.path.join(truth_dir, f"labelled_samples_with_family_{y}.csv")
                 for y in (years or [])
             ]
             year_csvs = [p for p in year_csvs if os.path.exists(p)]

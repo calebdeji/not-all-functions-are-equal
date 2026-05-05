@@ -56,10 +56,6 @@ ABLATION_REGISTRY = {
         'class': SDLComplexityPriorModel,
         'needs_fcg_dim': False,
     },
-    'sdl_with_intra_param': {
-        'class': SDLWithIntraParamModel,
-        'needs_fcg_dim': False,
-    },
     'sdl_without_structure': {
         'class': SDLWithoutStructureModel,
         'needs_fcg_dim': False,

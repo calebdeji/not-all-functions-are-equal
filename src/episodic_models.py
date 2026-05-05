@@ -569,33 +569,6 @@ class SDLComplexityPriorModel(BaseEpisodicModel):
         return F.normalize(x, p=2, dim=-1)
 
 
-class SDLWithIntraParamModel(BaseEpisodicModel):
-    """
-    Ablation: learnable scale on sim_in only, sim_out coefficient fixed at 1.
-    sigmoid(temp * (λa*sim_in - sim_out))  — 1 param.
-    Tests whether scaling the intra-class signal alone is sufficient.
-    """
-
-    def __init__(self, backbone):
-        super().__init__()
-        self.backbone = backbone
-        self.raw_lambda_a = nn.Parameter(torch.tensor(0.0))
-
-    def forward(self, data):
-        node_embs, fcg_batch = self.get_node_embeddings(data)
-        node_labels = torch.repeat_interleave(data.family_class, data.num_functions)
-        weights = TrainingUtils.generate_sdl_intra_param_weights(
-            node_embeddings=node_embs,
-            node_labels=node_labels,
-            lambda_a_val=self.raw_lambda_a,
-        )
-        return self.forward_attention(node_embs, fcg_batch, weights)
-
-    @staticmethod
-    def forward_attention(node_embeddings, batch, weights):
-        norm_w = _scatter_softmax(weights, batch)
-        x = _scatter_add(node_embeddings * norm_w.unsqueeze(-1), batch, dim=0)
-        return F.normalize(x, p=2, dim=-1)
 
 
 class SDLWithoutStructureModel(BaseEpisodicModel):
