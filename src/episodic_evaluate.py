@@ -892,8 +892,8 @@ def run_unified_evaluation(
             idx_to_family=_build_idx_to_family(test_ds),
         )
 
-    else: 
-        logger.error(f'Dataset split type: {params.dataset_split_type.value} — not valid')
+    else:
+        logger.error(f'Dataset split type: {params.dataset_split_type.value} — not supported')
 
         
 

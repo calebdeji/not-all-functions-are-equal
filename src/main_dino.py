@@ -139,7 +139,7 @@ def get_args_parser():
         help='Base/val/novel family ratios for no_overlap split.')
     parser.add_argument('--config', default='trial_config_v3', type=str,
         help='HiGraph config ID whose split files to use (e.g. trial_config_v3). '
-             'Determines the path: models/{config}/default_split.json.')
+             'Determines the path: dataset_config_split/{dataset}/{config}/split.json.')
     return parser
 
 
@@ -156,37 +156,6 @@ class ManifestDataset(torch.utils.data.Dataset):
         img = Image.open(self.paths[idx]).convert("RGB")
         return self.transform(img), 0  # dummy label for DINO
 
-
-def get_or_create_split(manifest_path, split_file, seed, ratios):
-    """Load an existing no_overlap split JSON or generate and save a new one."""
-    split_file = Path(split_file)
-    if split_file.exists():
-        with open(split_file) as f:
-            return json.load(f)
-
-    df = pd.read_csv(manifest_path)
-    families = sorted(df["family"].unique().tolist())
-    rng = random.Random(seed)
-    rng.shuffle(families)
-
-    n = len(families)
-    n_base = int(n * ratios[0])
-    n_val  = int(n * ratios[1])
-
-    split = {
-        "split_type": "no_overlap",
-        "seed": seed,
-        "ratios": ratios,
-        "base":  families[:n_base],
-        "val":   families[n_base:n_base + n_val],
-        "novel": families[n_base + n_val:],
-    }
-    split_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(split_file, "w") as f:
-        json.dump(split, f, indent=2)
-    print(f"Split saved -> {split_file}  "
-          f"(base={len(split['base'])}, val={len(split['val'])}, novel={len(split['novel'])})")
-    return split
 
 
 def build_pretrain_dataset(args, transform):
@@ -206,7 +175,7 @@ def build_pretrain_dataset(args, transform):
     if dataset_name in _FLAT_DATASET_NAMES:
         split_file = config_dir / "split.json"
     else:
-        split_file = config_dir / f"{args.split_type}_split.json"
+        split_file = config_dir / "split.json"
 
     if not split_file.exists():
         raise FileNotFoundError(

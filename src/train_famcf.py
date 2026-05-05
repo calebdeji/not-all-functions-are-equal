@@ -274,10 +274,7 @@ def train(args):
     from utils import  _FLAT_DATASET_NAMES
     years = config.years if hasattr(config, "years") else None
 
-    if dataset_name in _FLAT_DATASET_NAMES:
-        split_filename = "split.json"
-    else:
-        split_filename = "no_overlap_split.json"
+    split_filename = "split.json"
 
     split_json = os.path.join(
         Utils.get_project_root(), "dataset_config_split",

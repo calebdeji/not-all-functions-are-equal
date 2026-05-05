@@ -475,7 +475,7 @@ class Utils:
             if not all_years:
                 raise ValueError(f"Years must be specified for yearly datasets (e.g. HiGraph)")
             
-            split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "no_overlap_split.json"
+            split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "split.json"
             return Utils.extract_training_validation_and_test(all_years, split_file=split_file)
         
         raise ValueError(f"Unsupported dataset_split_type '{split_type}' for dataset '{dataset_name}'")
