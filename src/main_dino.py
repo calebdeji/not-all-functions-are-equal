@@ -191,7 +191,7 @@ def build_pretrain_dataset(args, transform):
     df = df[df["family"].isin(set(split["base"]))]
 
     if dataset_name in _FLAT_DATASET_NAMES:
-        paths = [str(img_root / Path(row.image_path).name) for _, row in df.iterrows()]
+        paths = [str(img_root / "images" / Path(row.image_path).name) for _, row in df.iterrows()]
     else:
         paths = [str(img_root / str(row.year) / Path(row.image_path).name) for _, row in df.iterrows()]
     return ManifestDataset(paths, transform)

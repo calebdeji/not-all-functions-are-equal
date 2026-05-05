@@ -10,18 +10,22 @@ Pipeline (per APK):
   2. Read raw bytes; pad to multiple of 3 with zeros.
   3. Treat every 3 consecutive bytes as one RGB pixel (values already 0-255).
   4. Arrange pixels into a 2D image of fixed width IMAGE_WIDTH (256 px).
-  5. Save as PNG to out_dir/{year}/{sha256}.png.
+  5. Save as PNG.
 
-Manifest CSV (androFIM_manifest.csv) is written incrementally and maps
-sha256 -> year, family, image_path for use by the dataset loader.
+Output layout:
+    HiGraph (yearly):
+        dataset/higraph/androfim/{year}/{sha256}.png
+        dataset/higraph/androfim/androFIM_manifest.csv
+        dataset/higraph/androfim/conversion.log
 
-Output:
-    dataset/higraph/androfim/{year}/{sha256}.png
-    dataset/higraph/androfim/androFIM_manifest.csv
-    processed_data/androFIM_images/conversion.log
+    Flat datasets (maldroid, kronodroid):
+        dataset/{name}/androfim/images/{sha256}.png
+        dataset/{name}/androfim/androFIM_manifest.csv
+        dataset/{name}/androfim/conversion.log
 
 Usage:
     python src/apk_to_androFIM_image.py
+    python src/apk_to_androFIM_image.py --dataset maldroid
     python src/apk_to_androFIM_image.py --years 2019 2020 2021
     python src/apk_to_androFIM_image.py --workers 8
 """
@@ -53,11 +57,11 @@ def setup_logger(log_path: str) -> logging.Logger:
     return logger
 
 
-def load_hash_family_map(csv_dir: Path) -> dict:
-    """Returns dict: sha256 -> (year_str, family_str)"""
+def load_hash_family_map(csv_dir: Path, flat: bool = False) -> dict:
+    """Returns dict: sha256 -> (year_str_or_None, family_str)"""
     mapping = {}
     for csv_path in sorted(csv_dir.glob("labelled_samples_with_family_*.csv")):
-        year = csv_path.stem.replace("labelled_samples_with_family_", "")
+        year = None if flat else csv_path.stem.replace("labelled_samples_with_family_", "")
         with open(csv_path, newline="") as f:
             for row in csv.DictReader(f):
                 mapping[row["hash"].strip().lower()] = (year, row["family"].strip())
@@ -110,9 +114,13 @@ def apk_to_image(apk_path: Path, out_path: Path) -> tuple[bool, str]:
     return True, ""
 
 
-def process_one(sha, year, family, apk_root, out_dir):
-    apk_path = apk_root / year / f"{sha}.apk"
-    out_path  = out_dir  / year / f"{sha}.png"
+def process_one(sha, year, family, apk_root, out_dir, flat: bool = False):
+    if flat:
+        apk_path = apk_root / f"{sha}.apk"
+        out_path  = out_dir / "images" / f"{sha}.png"
+    else:
+        apk_path = apk_root / year / f"{sha}.apk"
+        out_path  = out_dir / year / f"{sha}.png"
 
     if out_path.exists():
         return sha, "skipped", year, family, str(out_path)
@@ -127,38 +135,47 @@ def process_one(sha, year, family, apk_root, out_dir):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Convert HiGraph APKs to AndroFIM colour images"
+        description="Convert APKs to AndroFIM colour images"
     )
+    parser.add_argument("--dataset", default="higraph",
+                        help="Dataset name (higraph, maldroid, kronodroid). Default: higraph.")
     parser.add_argument("--apk_root", default=None,
-                        help="Root dir with year-subdirs of APKs. Defaults to raw_format/higraph.")
+                        help="Root dir of APKs. Defaults to raw_format/{dataset}.")
     parser.add_argument("--csv_dir",  default=None,
                         help="Dir with labelled_samples_with_family_*.csv. "
-                             "Defaults to dataset_refined_truth/higraph.")
+                             "Defaults to dataset_refined_truth/{dataset} (higraph) or "
+                             "dataset_refined_truth/{dataset} (flat datasets).")
     parser.add_argument("--out_dir",  default=None,
-                        help="Output directory for PNG images. Defaults to dataset/higraph/androfim.")
+                        help="Output directory. Defaults to dataset/{dataset}/androfim.")
     parser.add_argument("--years", nargs="+", default=None,
-                        help="Years to process (default: all)")
+                        help="Years to process (higraph only, default: all)")
     parser.add_argument("--workers", type=int, default=4,
                         help="Parallel worker threads (default: 4)")
     args = parser.parse_args()
 
     import sys; sys.path.insert(0, str(Path(__file__).parent))
-    from utils import Utils
-    project_root = Path(__file__).resolve().parent.parent
+    from utils import Utils, _FLAT_DATASET_NAMES
+    flat = args.dataset in _FLAT_DATASET_NAMES
+
+    if args.csv_dir is not None:
+        csv_dir = Path(args.csv_dir)
+    elif flat:
+        csv_dir = Path(Utils.get_refined_truth_root(args.dataset))
+    else:
+        csv_dir = Path(Utils.get_refined_truth_root(args.dataset))
+
     apk_root = Path(args.apk_root) if args.apk_root is not None \
-               else Path(Utils.get_raw_apk_root('higraph'))
-    csv_dir  = Path(args.csv_dir)  if args.csv_dir  is not None \
-               else Path(Utils.get_refined_truth_root('higraph'))
+               else Path(Utils.get_raw_apk_root(args.dataset))
     out_dir  = Path(args.out_dir)  if args.out_dir  is not None \
-               else Path(Utils.get_androfim_root('higraph'))
+               else Path(Utils.get_androfim_root(args.dataset))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     logger = setup_logger(str(out_dir / "conversion.log"))
 
-    hash_family = load_hash_family_map(csv_dir)
+    hash_family = load_hash_family_map(csv_dir, flat=flat)
     logger.info(f"Loaded {len(hash_family)} hash->family mappings")
 
-    if args.years:
+    if not flat and args.years:
         hashes = {sha: (yr, fam) for sha, (yr, fam) in hash_family.items()
                   if yr in set(args.years)}
     else:
@@ -176,7 +193,7 @@ def main():
 
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
             futures = {
-                executor.submit(process_one, sha, yr, fam, apk_root, out_dir): sha
+                executor.submit(process_one, sha, yr, fam, apk_root, out_dir, flat): sha
                 for sha, (yr, fam) in hashes.items()
             }
             for future in as_completed(futures):

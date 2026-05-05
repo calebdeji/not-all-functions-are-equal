@@ -58,9 +58,9 @@ def setup_logger():
 
 def load_hashes(year=None):
     pattern = (
-        os.path.join(HIGRAPH_DIR, f"higraph_labelled_with_family_index_{year}.csv")
+        os.path.join(HIGRAPH_DIR, f"labelled_samples_with_family_{year}.csv")
         if year
-        else os.path.join(HIGRAPH_DIR, "higraph_labelled_with_family_index_*.csv")
+        else os.path.join(HIGRAPH_DIR, "labelled_samples_with_family_*.csv")
     )
     files = sorted(glob.glob(pattern))
     if not files:
@@ -69,7 +69,7 @@ def load_hashes(year=None):
     hashes = {}
     for fpath in files:
         yr = os.path.basename(fpath) \
-               .replace("higraph_labelled_with_family_index_", "") \
+               .replace("labelled_samples_with_family_", "") \
                .replace(".csv", "")
         with open(fpath) as f:
             for row in csv.DictReader(f):

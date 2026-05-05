@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
 # run_training.sh
 # Full training pipeline in dependency order:
+#   0. Generate splits                (generate_splits.py — must run first)
 #   1. Graph-level instance backbone  (train_whole_graph_backbone.py — NT-Xent on graph embeddings only)
 #   2. Instance + set-level backbone  (train_back_bone.py — NT-Xent on graph + set-level node features)
 #   3. Episodic heads                 (self_attention, sdl_degree, sdl_complexity) — requires step 2
 #   4. FAMCF encoders                 (permission, api_call, opcode)
-#   5. AndroFIM                       (DINO pretrain → fine-tune, default + no_overlap)
+#   5. AndroFIM                       (DINO pretrain → fine-tune)
 #
 # Prerequisites for step 5 — run once before this script:
 #   bash run_extract_features.sh --csv <csv> --apk_dir <dir> --name higraph --stage androfim
-#   python src/generate_splits.py --config trial_config_v3
 #
 # Usage:
 #   bash run_training.sh                   # full pipeline
+#   bash run_training.sh splits
 #   bash run_training.sh instance_backbone
 #   bash run_training.sh full_backbone
 #   bash run_training.sh episodic
 #   bash run_training.sh famcf
 #   bash run_training.sh androfim
-#   bash run_training.sh fcgat 
+#   bash run_training.sh fcgat
 
 set -euo pipefail
 
@@ -30,6 +31,16 @@ GPUS=1
 WORKERS=4
 
 MANIFEST="dataset/${DATASET}/androfim/androFIM_manifest.csv"
+
+# ─── 0. Generate splits ───────────────────────────────────────────────────────
+run_splits() {
+    echo "========================================"
+    echo "[0] Generate splits  [${CONFIG}]"
+    echo "========================================"
+    python src/generate_splits.py \
+        --config "$CONFIG"
+    echo "--- Done ---"
+}
 
 # ─── 1. Graph-level instance backbone ────────────────────────────────────────
 run_instance_backbone() {
@@ -131,6 +142,7 @@ run_fcgat() {
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 case "$STAGE" in
     all)
+        run_splits
         run_instance_backbone
         run_full_backbone
         run_episodic
@@ -138,6 +150,7 @@ case "$STAGE" in
         run_androfim
         run_fcgat
         ;;
+    splits)            run_splits ;;
     instance_backbone) run_instance_backbone ;;
     full_backbone)     run_full_backbone ;;
     episodic)          run_episodic ;;
