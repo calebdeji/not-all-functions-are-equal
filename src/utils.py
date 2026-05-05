@@ -36,6 +36,7 @@ class ModelParameters:
 
     dataset_split_type: DatasetType = DatasetType.NoOverlap
     dataset_name: str = 'higraph'
+    years: list[str] | None = None  # for HiGraph only — restricts the generated samples CSV to these years
 
 
 
