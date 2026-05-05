@@ -165,7 +165,7 @@ def _build_androfim_hash_to_path(manifest_path, img_root, flat: bool = False):
     for _, row in df.iterrows():
         filename = f"{row.sha256}.png"
         if flat:
-            path = str(img_root / filename)
+            path = str(img_root / "images" / filename)
         else:
             path = str(img_root / str(row.year) / filename)
         if os.path.exists(path):

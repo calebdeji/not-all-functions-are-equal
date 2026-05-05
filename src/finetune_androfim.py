@@ -124,7 +124,7 @@ class AndroFIMBaseDataset(Dataset):
 
         if img_root is not None:
             if flat:
-                self.paths = [str(img_root / Path(row.image_path).name) for _, row in df.iterrows()]
+                self.paths = [str(img_root / "images" / Path(row.image_path).name) for _, row in df.iterrows()]
             else:
                 self.paths = [str(img_root / str(row.year) / Path(row.image_path).name) for _, row in df.iterrows()]
         else:
@@ -154,7 +154,7 @@ class AndroFIMBaseDataset(Dataset):
 
         if img_root is not None:
             if flat:
-                obj.paths = [str(img_root / Path(row.image_path).name) for _, row in df.iterrows()]
+                obj.paths = [str(img_root / "images" / Path(row.image_path).name) for _, row in df.iterrows()]
             else:
                 obj.paths = [str(img_root / str(row.year) / Path(row.image_path).name) for _, row in df.iterrows()]
         else:
