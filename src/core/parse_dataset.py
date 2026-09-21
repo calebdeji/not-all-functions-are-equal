@@ -17,7 +17,7 @@ import pandas as pd
 from torch_geometric.data import Dataset, Data
 
 
-from utils import Utils
+from src.core.utils import Utils
 
 
 def get_dataset_root():

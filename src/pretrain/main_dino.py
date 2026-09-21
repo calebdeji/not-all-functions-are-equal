@@ -32,10 +32,10 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torchvision import models as torchvision_models
 
-import androfim_utils as utils
-import vision_transformer as vits
-from vision_transformer import DINOHead
-import resnet12 as resnet12_models
+from src.core import androfim_utils as utils
+from src.core import vision_transformer as vits
+from src.core.vision_transformer import DINOHead
+from src.core import resnet12 as resnet12_models
 
 torchvision_archs = sorted(name for name in torchvision_models.__dict__
     if name.islower() and not name.startswith("__")
@@ -160,8 +160,8 @@ class ManifestDataset(torch.utils.data.Dataset):
 
 def build_pretrain_dataset(args, transform):
     """Return a dataset of pre-training images based on split_type."""
-    from utils import Utils, _FLAT_DATASET_NAMES
-    repo_root     = Path(__file__).resolve().parent.parent
+    from src.core.utils import Utils, _FLAT_DATASET_NAMES
+    repo_root     = Path(Utils.get_project_root())
     dataset_name  = getattr(args, 'dataset_name', 'higraph')
     manifest_path = args.manifest if args.manifest is not None \
                     else Utils.get_androfim_manifest(dataset_name)
@@ -541,8 +541,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('DINO', parents=[get_args_parser()])
     args = parser.parse_args()
 
-    from experiment_configs import ExperimentConfig
-    from utils import Utils as _Utils
+    from src.core.experiment_configs import ExperimentConfig
+    from src.core.utils import Utils as _Utils
     _config = getattr(ExperimentConfig, f'get_{args.config}')()
     args.split_type   = _config.dataset_split_type.value
     args.dataset_name = _config.dataset_name

@@ -29,9 +29,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-from utils import Utils as _Utils
+from src.core.utils import Utils as _Utils
 
 ANDROZOO_URL = "https://androzoo.uni.lu/api/download"
 HIGRAPH_DIR  = _Utils.get_refined_truth_root('higraph')

@@ -26,7 +26,7 @@ from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
 
-from resnet12 import ResNet12
+from src.core.resnet12 import ResNet12
 
 
 # ─── Constants ────────────────────────────────────────────────────────────────

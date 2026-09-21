@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import logging
 from torch_geometric.loader import DataLoader
 
-from utils import Utils
+from src.core.utils import Utils
 
 
 

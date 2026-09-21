@@ -3,13 +3,13 @@ import os
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-from utils import ModelParameters, Utils
-from backbone import Backbone, BackboneProjectionHead
-from experiment_configs import ExperimentConfig
+from src.core.utils import ModelParameters, Utils
+from src.core.backbone import Backbone, BackboneProjectionHead
+from src.core.experiment_configs import ExperimentConfig
 
-from cross_view_alignment import validate_cross_view_alignment
+from src.core.cross_view_alignment import validate_cross_view_alignment
 
-from parse_dataset import HiGraphData
+from src.core.parse_dataset import HiGraphData
 
 
 

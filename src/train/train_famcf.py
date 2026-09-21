@@ -34,9 +34,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset
 
-from utils import Utils
-from experiment_configs import ExperimentConfig
-from famcf_dataset import (
+from src.core.utils import Utils
+from src.core.experiment_configs import ExperimentConfig
+from src.core.famcf_dataset import (
     FAMCFDataset,
     get_family_splits,
 )
@@ -271,10 +271,14 @@ def train(args):
     # ── Detect backend and load datasets ──────────────────────────────────────
     logger.info(f"Backend: {'pkl (FAMCFDataset)'}")
 
-    from utils import  _FLAT_DATASET_NAMES
-    years = config.years if hasattr(config, "years") else None
+    from src.core.utils import DatasetType, _FLAT_DATASET_NAMES
+    no_overlap = config.dataset_split_type == DatasetType.NoOverlap
+    years = config.training_years if not no_overlap else config.training_years + config.test_years
 
-    split_filename = "split.json"
+    if dataset_name in _FLAT_DATASET_NAMES:
+        split_filename = "split.json"
+    else:
+        split_filename = "no_overlap_split.json" if no_overlap else "temporal_split.json"
 
     split_json = os.path.join(
         Utils.get_project_root(), "dataset_config_split",

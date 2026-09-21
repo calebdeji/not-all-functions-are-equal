@@ -7,7 +7,7 @@ ResNet12.forward() does not call either, so this is harmless.
 
 Changes required in main_dino.py:
   1. Add at the top (with the other imports):
-         import resnet12 as resnet12_models
+         from src.core import resnet12 as resnet12_models
 
   2. In train_dino(), add this elif BEFORE the torchvision fallback:
          elif args.arch in resnet12_models.__dict__:

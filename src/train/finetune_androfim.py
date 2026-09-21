@@ -17,7 +17,7 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
-from resnet12 import ResNet12
+from src.core.resnet12 import ResNet12
 
 
 
@@ -231,12 +231,12 @@ def main():
     parser.add_argument("--workers",     type=int,   default=4)
     args = parser.parse_args()
 
-    from experiment_configs import ExperimentConfig
-    from utils import Utils
+    from src.core.experiment_configs import ExperimentConfig
+    from src.core.utils import Utils
     _config  = getattr(ExperimentConfig, f'get_{args.config}')()
     split_type = _config.dataset_split_type.value
 
-    project_root = Path(__file__).resolve().parent.parent
+    project_root = Path(Utils.get_project_root())
     androfim_dir = Utils.get_androfim_save_dir(_config.id, args.dataset, split_type)
     dino_ckpt = Path(args.dino_ckpt) if args.dino_ckpt is not None \
                 else Path(androfim_dir) / "checkpoint.pth"
@@ -251,7 +251,7 @@ def main():
     logger.info(f"Device: {device} | Epochs: {args.epochs} | Batch: {args.batch_size} | Config: {args.config}")
 
     # ── Dataset ──────────────────────────────────────────────────────────────
-    from utils import _FLAT_DATASET_NAMES
+    from src.core.utils import _FLAT_DATASET_NAMES
     img_root   = Path(Utils.get_androfim_root(args.dataset))
     config_dir = project_root / "dataset_config_split" / args.dataset / _config.id
 

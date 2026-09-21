@@ -152,9 +152,7 @@ def main():
     parser.add_argument("--workers", type=int, default=4,
                         help="Parallel worker threads (default: 4)")
     args = parser.parse_args()
-
-    import sys; sys.path.insert(0, str(Path(__file__).parent))
-    from utils import Utils, _FLAT_DATASET_NAMES
+    from src.core.utils import Utils, _FLAT_DATASET_NAMES
     flat = args.dataset in _FLAT_DATASET_NAMES
 
     if args.csv_dir is not None:

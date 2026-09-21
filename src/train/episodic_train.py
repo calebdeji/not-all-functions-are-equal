@@ -25,11 +25,11 @@ from torch.utils.data import Subset
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-from backbone import Backbone
-from experiment_configs import ExperimentConfig
-from utils import Utils, ModelParameters, DatasetType
-from parse_dataset import HiGraphData
-from episodic_models import (
+from src.core.backbone import Backbone
+from src.core.experiment_configs import ExperimentConfig
+from src.core.utils import Utils, ModelParameters, DatasetType
+from src.core.parse_dataset import HiGraphData
+from src.core.episodic_models import (
     TrainingUtils,
     SelfAttentionModel,
     SDLDegreeModel,
@@ -413,7 +413,7 @@ def episodic_finetune(
     Saves best model by validation accuracy; stops early when patience is exceeded.
     """
     # Import here to avoid circular imports at module level
-    from episodic_evaluate import OnTheFlyFewShotEvaluator
+    from src.eval.episodic_evaluate import OnTheFlyFewShotEvaluator
 
     device = next(model.parameters()).device
     aux_criterion = SupConLoss(temperature=supcon_temp).to(device)

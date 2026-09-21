@@ -36,11 +36,11 @@ from torch.utils.data import Subset
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-from backbone import Backbone
-from experiment_configs import ExperimentConfig
-from utils import Utils, ModelParameters, _FLAT_DATASET_NAMES
-from parse_dataset import HiGraphDataset, HiGraphData, get_dataset_root
-from episodic_models import (
+from src.core.backbone import Backbone
+from src.core.experiment_configs import ExperimentConfig
+from src.core.utils import Utils, ModelParameters, _FLAT_DATASET_NAMES
+from src.core.parse_dataset import HiGraphDataset, HiGraphData, get_dataset_root
+from src.core.episodic_models import (
     TrainingUtils,
     SelfAttentionModel,
     SDLDegreeModel,
@@ -51,7 +51,7 @@ from episodic_models import (
     _scatter_mean,
     _scatter_softmax,
 )
-from episodic_train import (
+from src.train.episodic_train import (
     BASELINE_REGISTRY,
     MODEL_REGISTRY,
     create_model,
@@ -61,13 +61,13 @@ from episodic_train import (
     SDL_REGISTRY,
 )
 
-from eval_androfim import (
+from src.eval.eval_androfim import (
     run_episode   as _androfim_run_episode,
     load_backbone as _load_androfim_backbone,
     CROP_SIZE     as _ANDROFIM_CROP_SIZE,
     N_CROPS       as _ANDROFIM_N_CROPS,
 )
-from train_famcf import MLPEncoder
+from src.train.train_famcf import MLPEncoder
 
 
 # ---------------------------------------------------------------------------
@@ -815,7 +815,7 @@ def run_unified_evaluation(
 
     Returns (results, tracker).
     """
-    from utils import DatasetType
+    from src.core.utils import DatasetType
     if n_shots is None:
         n_shots = [1, 5]
     
@@ -898,8 +898,8 @@ def run_unified_evaluation(
 # ---------------------------------------------------------------------------
 
 def main():
-    from utils import DatasetType
-    from fcgat_model import StandaloneFCGAT
+    from src.core.utils import DatasetType
+    from src.core.fcgat_model import StandaloneFCGAT
 
     parser = argparse.ArgumentParser(description='Unified few-shot evaluation — all models on same episodes')
     parser.add_argument('--config', default='trial_config_v3')

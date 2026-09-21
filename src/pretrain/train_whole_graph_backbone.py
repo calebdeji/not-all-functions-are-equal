@@ -5,10 +5,10 @@ from torch.utils.data import WeightedRandomSampler
 from torch_geometric.data import DataLoader
 from tqdm import tqdm
 
-from backbone import BackboneProjectionHead, Backbone
-from experiment_configs import ExperimentConfig
-from utils import ModelParameters, Utils
-from parse_dataset import HiGraphData
+from src.core.backbone import BackboneProjectionHead, Backbone
+from src.core.experiment_configs import ExperimentConfig
+from src.core.utils import ModelParameters, Utils
+from src.core.parse_dataset import HiGraphData
 
 def _make_weighted_sampler(training_dataset) -> WeightedRandomSampler:
     """Build a WeightedRandomSampler that equalises class frequencies."""

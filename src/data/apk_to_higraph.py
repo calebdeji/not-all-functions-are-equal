@@ -378,9 +378,7 @@ def process_apk_wrapper(args):
 
 def main():
     import csv as _csv
-    import sys as _sys
-    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from utils import Utils, _FLAT_DATASET_NAMES
+    from src.core.utils import Utils, _FLAT_DATASET_NAMES
 
     parser = argparse.ArgumentParser(
         description="Generate hierarchical graph data (FCG & CFGs) from APKs using Androguard."

@@ -11,6 +11,7 @@ from enum import Enum
 
 class DatasetType(Enum):
     NoOverlap = 'no_overlap'
+    Temporal = 'temporal'
 
 
 
@@ -33,10 +34,11 @@ class ModelParameters:
     backbone_set_level_features_top_k : int
     backbone_pretrain_instance_level_projection_temperature : float
     backbone_pretrain_set_level_projection_temperature : float
+    training_years : list[str]
+    test_years : list[str]
 
     dataset_split_type: DatasetType = DatasetType.NoOverlap
     dataset_name: str = 'higraph'
-    years: list[str] | None = None  # for HiGraph only — restricts the generated samples CSV to these years
 
 
 
@@ -62,7 +64,7 @@ class Utils:
 
     @staticmethod
     def get_project_root():
-        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     @staticmethod
     def get_graph_root(dataset: str) -> str:
@@ -70,7 +72,7 @@ class Utils:
         Returns the PyG dataset root for the given dataset name.
         Edit this function if the dataset layout changes.
 
-        dataset: 'higraph' | 'maldroid'
+        dataset: 'higraph' | 'maldroid' | 'kronodroid'
         """
         return os.path.join(Utils.get_project_root(), 'dataset', dataset, 'graph')
 
@@ -109,7 +111,7 @@ class Utils:
         Returns the dataset_refined_truth directory for the given dataset name.
         Edit this function if the dataset layout changes.
 
-        dataset: 'higraph' | 'maldroid' 
+        dataset: 'higraph' | 'maldroid' | 'kronodroid'
         """
         return os.path.join(Utils.get_project_root(), 'dataset_refined_truth', dataset)
 
@@ -291,7 +293,7 @@ class Utils:
 
     @staticmethod
     def extract_training_validation_and_test(years: list[str], split_file=None):
-        from parse_dataset import HiGraphDataset, HiGraphData, get_dataset_root
+        from src.core.parse_dataset import HiGraphDataset, HiGraphData, get_dataset_root
         from torch.utils.data import ConcatDataset, Subset
 
         year_datasets = [HiGraphDataset(root=get_dataset_root(), year=year) for year in years]
@@ -343,8 +345,59 @@ class Utils:
         return train_ds, val_ds, test_ds
 
     @staticmethod
+    def extract_temporal_split(training_years: list, test_years: list, split_file=None):
+        """
+        Temporal evaluation split:
+          train / val  — 80/20 sample-level split from training_years, all families present in both.
+          test         — all samples from test_years, all families included (no filtering).
+        """
+        from src.core.parse_dataset import HiGraphDataset, get_dataset_root
+        from torch.utils.data import ConcatDataset, Subset
+
+        train_year_datasets = [HiGraphDataset(root=get_dataset_root(), year=y) for y in training_years]
+        train_combined = ConcatDataset(train_year_datasets)
+        n_train_total = sum(len(d) for d in train_year_datasets)
+
+        perm = torch.randperm(n_train_total, generator=torch.Generator().manual_seed(42)).tolist()
+        cut = int(0.8 * n_train_total)
+        train_ds = Subset(train_combined, perm[:cut])
+        val_ds   = Subset(train_combined, perm[cut:])
+
+        # Build flat hash list from raw_file_names (avoids loading full graph data)
+        all_hashes = []
+        for ds in train_year_datasets:
+            for fname in ds.raw_file_names:
+                all_hashes.append(fname[:-5])  # strip '.json'
+        train_hashes = [all_hashes[i] for i in perm[:cut]]
+        val_hashes   = [all_hashes[i] for i in perm[cut:]]
+
+        test_year_datasets = [HiGraphDataset(root=get_dataset_root(), year=y) for y in test_years]
+        test_combined = ConcatDataset(test_year_datasets)
+        n_test_total = sum(len(d) for d in test_year_datasets)
+        test_ds = Subset(test_combined, list(range(n_test_total)))
+
+        if split_file is not None:
+            split_file = Path(split_file)
+            if not split_file.exists():
+                split_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(split_file, 'w') as f:
+                    json.dump({
+                        'training_years': training_years,
+                        'test_years': test_years,
+                        'train_indices': perm[:cut],
+                        'val_indices': perm[cut:],
+                        'train_hashes': train_hashes,
+                        'val_hashes': val_hashes,
+                    }, f, indent=2)
+                print(f"[Split] Saved -> {split_file}  "
+                      f"(train={cut}, val={n_train_total - cut}, "
+                      f"test=all samples from {test_years})")
+
+        return train_ds, val_ds, test_ds
+
+    @staticmethod
     def extract_stratified_training_validation_and_test(years: list[str]):
-        from parse_dataset import HiGraphDataset, HiGraphData, get_dataset_root
+        from src.core.parse_dataset import HiGraphDataset, HiGraphData, get_dataset_root
         from torch.utils.data import ConcatDataset, Subset
         from collections import defaultdict
 
@@ -448,37 +501,38 @@ class Utils:
         """
         Returns (train_ds, val_ds, test_ds) based on dataset_name + dataset_split_type.
 
-        Flat datasets (maldroid, drebin) have no yearly structure; only
-        'no_overlap' is supported.
+        Flat datasets (maldroid, kronodroid) have no temporal structure; only
+        'no_overlap' is supported.  Raises ValueError for 'default'/'temporal'.
 
+        Temporal dataset (higraph):
+            default/temporal — training_years only, disjoint family split.
+            no_overlap       — all years, disjoint family split.
         """
         split_type   = parameters.dataset_split_type
         dataset_name = parameters.dataset_name
 
-        # ── Flat datasets (no yearly structure) ─────────────────────────
+        # ── Flat datasets (no temporal structure) ─────────────────────────
         if dataset_name in _FLAT_DATASET_NAMES:
-            if split_type != DatasetType.NoOverlap:
+            if split_type == DatasetType.Temporal:
                 raise ValueError(
-                    f"dataset_split_type={split_type} is not valid for dataset "
-                    f"'{dataset_name}' which has no yearly data. "
+                    f"dataset_split_type='temporal' is not valid for dataset "
+                    f"'{dataset_name}' which has no temporal data. "
                     f"Use 'no_overlap' instead."
                 )
-            from parse_dataset import FlatGraph
+            from src.core.parse_dataset import FlatGraph
             ds = FlatGraph(root=Utils.get_graph_root(dataset_name))
             split_file = Path(Utils.get_project_root()) / "dataset_config_split" / dataset_name / parameters.id / "split.json"
             return Utils.extract_flat_dataset_splits(ds, split_file=split_file)
 
-        # ── Yearly dataset (higraph) ─────────────────────────────────────
-        if split_type == DatasetType.NoOverlap and not dataset_name in _FLAT_DATASET_NAMES:
-            all_years  = parameters.years
-            
-            if not all_years:
-                raise ValueError(f"Years must be specified for yearly datasets (e.g. HiGraph)")
-            
-            split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "split.json"
-            return Utils.extract_training_validation_and_test(all_years, split_file=split_file)
-        
-        raise ValueError(f"Unsupported dataset_split_type '{split_type}' for dataset '{dataset_name}'")
+        # ── HiGraph ───────────────────────────────────────────────────────
+        if split_type == DatasetType.Temporal:
+            split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "temporal_split.json"
+            return Utils.extract_temporal_split(parameters.training_years, parameters.test_years, split_file=split_file)
+
+        # NoOverlap
+        all_years  = parameters.training_years + parameters.test_years
+        split_file = Path(Utils.get_project_root()) / "dataset_config_split" / "higraph" / parameters.id / "no_overlap_split.json"
+        return Utils.extract_training_validation_and_test(all_years, split_file=split_file)
 
     @staticmethod
     def get_models_destination(parameters: ModelParameters):
@@ -501,6 +555,24 @@ class Utils:
         arch_dir = os.path.join(Utils.get_models_destination(parameters), "graph_level_backbone")
         os.makedirs(arch_dir, exist_ok=True)
         return os.path.join(arch_dir, "whole_graph_backbone.pth")
+
+    @staticmethod
+    def get_flat_fcg_backbone_model_saved_path(parameters: ModelParameters):
+        arch_dir = os.path.join(Utils.get_models_destination(parameters), "flat_fcg_backbone")
+        os.makedirs(arch_dir, exist_ok=True)
+        return os.path.join(arch_dir, "flat_fcg_backbone.pth")
+
+    @staticmethod
+    def get_set_only_backbone_model_saved_path(parameters: ModelParameters):
+        arch_dir = os.path.join(Utils.get_models_destination(parameters), "set_only_backbone")
+        os.makedirs(arch_dir, exist_ok=True)
+        return os.path.join(arch_dir, "set_only_backbone.pth")
+
+    @staticmethod
+    def get_instance_only_backbone_model_saved_path(parameters: ModelParameters):
+        arch_dir = os.path.join(Utils.get_models_destination(parameters), "instance_only_backbone")
+        os.makedirs(arch_dir, exist_ok=True)
+        return os.path.join(arch_dir, "instance_only_backbone.pth")
 
     @staticmethod
     def get_fcgat_model_saved_path(parameters: ModelParameters):

@@ -286,10 +286,8 @@ def main():
     parser.add_argument("--top_ngrams", type=int, default=343,
                         help="Top-K most frequent opcode 3-grams to keep (default: 343, matches FAMCF paper).")
     args = parser.parse_args()
-
-    import sys; sys.path.insert(0, str(Path(__file__).parent))
-    from utils import Utils
-    project_root = Path(__file__).resolve().parent.parent
+    from src.core.utils import Utils
+    project_root = Path(Utils.get_project_root())
     apk_root = Path(args.apk_root) if args.apk_root is not None \
                else Path(Utils.get_raw_apk_root('higraph'))
     csv_dir  = Path(args.csv_dir)  if args.csv_dir  is not None \

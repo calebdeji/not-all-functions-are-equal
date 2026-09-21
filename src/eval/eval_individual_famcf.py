@@ -23,13 +23,13 @@ import scipy.stats as st
 import torch
 from tqdm import tqdm
 
-from experiment_configs import ExperimentConfig
-from utils import Utils
-from train_famcf import MLPEncoder
-from parse_dataset import HiGraphData
-from episodic_models import _scatter_mean
-from episodic_evaluate import _build_famcf_hash_to_features
-from episodic_train import extract_episode, build_episode_batches
+from src.core.experiment_configs import ExperimentConfig
+from src.core.utils import Utils
+from src.train.train_famcf import MLPEncoder
+from src.core.parse_dataset import HiGraphData
+from src.core.episodic_models import _scatter_mean
+from src.eval.episodic_evaluate import _build_famcf_hash_to_features
+from src.train.episodic_train import extract_episode, build_episode_batches
 
 
 # ---------------------------------------------------------------------------

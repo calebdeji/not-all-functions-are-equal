@@ -1,11 +1,13 @@
 
-from utils import ModelParameters,DatasetType
+from src.core.utils import ModelParameters,DatasetType
 
 class ExperimentConfig:
     @staticmethod
     def get_trial_config() -> ModelParameters:
         return ModelParameters(
             id = 'trial_config',
+            training_years = ["2012", "2013", "2014", "2015", "2016"],
+            test_years = ["2017"],
             cfg_dim = 10,
             func_feat_dim = 8,
             cfg_hidden_channels=256,
@@ -28,6 +30,8 @@ class ExperimentConfig:
     def get_trial_config_v2() -> ModelParameters:
         return ModelParameters(
             id='trial_config_v2',
+            training_years=["2012", "2013", "2014", "2015", "2016"],
+            test_years=["2017"],
             cfg_dim=10,
             func_feat_dim=8,
             cfg_hidden_channels=256,
@@ -66,7 +70,8 @@ class ExperimentConfig:
             "backbone_pretrain_instance_level_projection_temperature": 0.1,
             "backbone_pretrain_set_level_projection_temperature": 0.1,
             'id': 'trial_config_v3',
-            "years": ["2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021"]
+            "training_years": ["2012", "2013", "2014", "2015", "2016", "2017", "2018"],
+            "test_years": ["2019", "2020", "2021"],
         }
 
     @staticmethod
@@ -83,6 +88,10 @@ class ExperimentConfig:
     @staticmethod
     def get_trial_config_v3_higraph_no_overlap() -> ModelParameters:
         return ExperimentConfig._get_trial_config_v3_variant('higraph', DatasetType.NoOverlap)
+
+    @staticmethod
+    def get_trial_config_v3_higraph_temporal() -> ModelParameters:
+        return ExperimentConfig._get_trial_config_v3_variant('higraph', DatasetType.Temporal)
 
     @staticmethod
     def get_trial_config_v3_maldroid_no_overlap() -> ModelParameters:
