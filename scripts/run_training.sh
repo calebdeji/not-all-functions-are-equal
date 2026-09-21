@@ -37,7 +37,7 @@ run_splits() {
     echo "========================================"
     echo "[0] Generate splits  [${CONFIG}]"
     echo "========================================"
-    python src/generate_splits.py \
+    python -m src.data.generate_splits \
         --config "$CONFIG"
     echo "--- Done ---"
 }
@@ -47,7 +47,7 @@ run_instance_backbone() {
     echo "========================================"
     echo "[1] Graph-level instance backbone  [${CONFIG}]"
     echo "========================================"
-    python src/train_whole_graph_backbone.py \
+    python -m src.pretrain.train_whole_graph_backbone \
         --config       "$CONFIG"
     echo "--- Done ---"
 }
@@ -57,7 +57,7 @@ run_full_backbone() {
     echo "========================================"
     echo "[2] Instance + set-level backbone  [${CONFIG}]"
     echo "========================================"
-    python src/train_back_bone.py \
+    python -m src.pretrain.train_back_bone \
         --config       "$CONFIG"
     echo "--- Done ---"
 }
@@ -68,7 +68,7 @@ run_episodic() {
         echo "========================================"
         echo "[3] Episodic — ${VARIANT}  [${CONFIG}]"
         echo "========================================"
-        python src/episodic_train.py \
+        python -m src.train.episodic_train \
             --config       "$CONFIG" \
             --variant      "$VARIANT" \
             --seed         42
@@ -83,7 +83,7 @@ run_famcf() {
         echo "========================================"
         echo "[4] FAMCF — ${FT}  [${CONFIG}]"
         echo "========================================"
-        python src/train_famcf.py \
+        python -m src.train.train_famcf \
             --config       "$CONFIG" \
             --data_dir     "dataset/${DATASET}" \
             --feature_type "$FT"
@@ -98,7 +98,7 @@ run_androfim() {
     echo "========================================"
     python -m torch.distributed.launch \
         --nproc_per_node="$GPUS" \
-        src/main_dino.py \
+        --module src.pretrain.main_dino \
         --arch                resnet12 \
         --manifest            "$MANIFEST" \
         --config              "$CONFIG" \
@@ -116,7 +116,7 @@ run_androfim() {
     echo "========================================"
     echo "[5b] AndroFIM fine-tune  [${CONFIG}]"
     echo "========================================"
-    python src/finetune_androfim.py \
+    python -m src.train.finetune_androfim \
         --dataset     "$DATASET" \
         --manifest    "$MANIFEST" \
         --config      "$CONFIG" \
@@ -134,7 +134,7 @@ run_fcgat() {
     echo "========================================"
     echo "[6] Adapted FCGAT  [${CONFIG}]"
     echo "========================================"
-    python src/train_fcgat.py \
+    python -m src.train.train_fcgat \
         --config       "$CONFIG"
     echo "--- Done ---"
 }

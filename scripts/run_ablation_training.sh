@@ -34,7 +34,7 @@ run_variant() {
     echo "========================================"
     echo "[ablation] ${VARIANT}  [${CONFIG}]"
     echo "========================================"
-    python src/episodic_train.py \
+    python -m src.train.episodic_train \
         --config  "$CONFIG" \
         --variant "$VARIANT" \
         --seed    "$SEED"
