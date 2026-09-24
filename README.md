@@ -6,7 +6,7 @@ A graph-based few-shot learning system for classifying Android malware families 
 
 ## How It Works
 
-Each APK is parsed into a **HiGraph** — a two-level graph representation:
+Each APK is parsed into a **HiGraph** — a graph representation with two levels:
 
 - **CFG (Control Flow Graph)**: basic blocks as nodes with opcode/feature vectors, connected by control flow edges
 - **FCG (Function Call Graph)**: functions as nodes with structural features (cyclomatic complexity, degree profile), connected by call edges
