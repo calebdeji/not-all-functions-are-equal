@@ -927,25 +927,37 @@ def run_unified_evaluation(
         )
 
     elif params.dataset_split_type == DatasetType.Temporal:
-        logger.info(f'Dataset split type: temporal — evaluating on all families from test years {params.test_years}')
+        logger.info(f'Dataset split type: temporal — evaluating on families from {params.test_years} '
+                    f'that are absent from the {params.training_years[0]}-{params.training_years[-1]} training period')
 
-        # ---- Per-year evaluation ----
+        # Families seen anywhere in the training period — excluded from every temporal evaluation
+        seen_families = set()
+        for _yr in params.training_years:
+            seen_families.update(
+                HiGraphDataset(root=get_dataset_root(), year=_yr).get_labels().tolist()
+            )
+        logger.info(f'Families seen during training: {len(seen_families)}')
+
+        # ---- Per-year evaluation (unseen families only) ----
         logger.info(f'\n--- Per-year temporal evaluation ---')
         for year in params.test_years:
             year_ds = HiGraphDataset(root=get_dataset_root(), year=year)
             year_labels = year_ds.get_labels()
+
+            novel_idx = [i for i, lbl in enumerate(year_labels.tolist()) if lbl not in seen_families]
             year_indices_by_class = defaultdict(list)
-            for i, lbl in enumerate(year_labels.tolist()):
-                year_indices_by_class[lbl].append(i)
+            for sub_i, orig_i in enumerate(novel_idx):
+                year_indices_by_class[year_labels[orig_i].item()].append(sub_i)
 
             n_year_families = len(year_indices_by_class)
-            logger.info(f'Year {year} — families: {n_year_families}  samples: {len(year_labels)}')
+            logger.info(f'Year {year} — unseen families: {n_year_families}  samples: {len(novel_idx)} '
+                        f'(excluded {len(year_labels) - len(novel_idx)} samples of seen families)')
 
             if n_year_families < n_way:
-                logger.warning(f'  Skipping year {year}: only {n_year_families} families (need {n_way})')
+                logger.warning(f'  Skipping year {year}: only {n_year_families} unseen families (need {n_way})')
                 continue
 
-            year_subset = Subset(year_ds, list(range(len(year_ds))))
+            year_subset = Subset(year_ds, novel_idx)
             results[f'year_{year}'] = _run_unified_episodes(
                 evaluators, fcgat, year_subset, year_indices_by_class,
                 n_way, n_shots, n_query, n_episodes, device, f'year_{year}', logger,
@@ -973,10 +985,13 @@ def run_unified_evaluation(
             indices_by_class[lbl].append(i)
 
         n_families = len(indices_by_class)
-        logger.info(f'Temporal test set (combined) — families: {n_families}  samples: {len(subset_labels)}')
+        logger.info(f'Temporal test set (combined) — unseen families: {n_families}  '
+                    f'samples: {len(subset_labels)}')
+        assert not (set(indices_by_class) & seen_families), \
+            'Temporal test pool contains families seen during training'
 
         if n_families < n_way:
-            logger.warning(f'Skipping combined: only {n_families} families (need {n_way})')
+            logger.warning(f'Skipping combined: only {n_families} unseen families (need {n_way})')
         else:
             results['test_split'] = _run_unified_episodes(
                 evaluators, fcgat, test_ds, indices_by_class,

@@ -349,7 +349,13 @@ class Utils:
         """
         Temporal evaluation split:
           train / val  — 80/20 sample-level split from training_years, all families present in both.
-          test         — all samples from test_years, all families included (no filtering).
+          test         — samples from test_years belonging ONLY to families that do not occur
+                         anywhere in the training period, so temporal generalization is measured
+                         on families the model has never seen.
+
+        A family counts as "seen" if it appears anywhere in training_years, not merely in the
+        80% train portion; the 20% validation slice is drawn from the same period and so carries
+        no additional families.
         """
         from src.core.parse_dataset import HiGraphDataset, get_dataset_root
         from torch.utils.data import ConcatDataset, Subset
@@ -371,10 +377,22 @@ class Utils:
         train_hashes = [all_hashes[i] for i in perm[:cut]]
         val_hashes   = [all_hashes[i] for i in perm[cut:]]
 
+        # Families observed anywhere in the training period
+        seen_families = set()
+        for ds in train_year_datasets:
+            seen_families.update(ds.get_labels().tolist())
+
+        # Test pool: only families absent from the training period
         test_year_datasets = [HiGraphDataset(root=get_dataset_root(), year=y) for y in test_years]
         test_combined = ConcatDataset(test_year_datasets)
-        n_test_total = sum(len(d) for d in test_year_datasets)
-        test_ds = Subset(test_combined, list(range(n_test_total)))
+        test_labels = torch.cat([ds.get_labels() for ds in test_year_datasets])
+        novel_indices = [i for i, lbl in enumerate(test_labels.tolist()) if lbl not in seen_families]
+        novel_families = {test_labels[i].item() for i in novel_indices}
+        test_ds = Subset(test_combined, novel_indices)
+
+        print(f"[Split] Temporal test pool: {len(novel_indices)} samples from "
+              f"{len(novel_families)} families absent from {training_years[0]}-{training_years[-1]} "
+              f"(dropped {len(test_labels) - len(novel_indices)} samples of seen families)")
 
         if split_file is not None:
             split_file = Path(split_file)
@@ -388,10 +406,13 @@ class Utils:
                         'val_indices': perm[cut:],
                         'train_hashes': train_hashes,
                         'val_hashes': val_hashes,
+                        'test_novel_indices': novel_indices,
+                        'test_novel_families': sorted(novel_families),
                     }, f, indent=2)
                 print(f"[Split] Saved -> {split_file}  "
                       f"(train={cut}, val={n_train_total - cut}, "
-                      f"test=all samples from {test_years})")
+                      f"test={len(novel_indices)} samples from {len(novel_families)} "
+                      f"unseen families in {test_years})")
 
         return train_ds, val_ds, test_ds
 

@@ -338,9 +338,10 @@ mean ± CI is printed every 20 episodes, so a long run can be monitored while in
 
 ## Temporal Evaluation
 
-Trains on pre-2019 data and evaluates on 2019–2021, measuring generalization to families as
-they appear over time. Unlike the `no_overlap` setting, test families may also occur in
-training; the split is by *time*, not by family.
+Trains on pre-2019 data and evaluates on 2019–2021, measuring generalization to families that
+emerge *after* the training period. The test pool is restricted to families that do not occur
+anywhere in 2012–2018, so this setting is temporally separated **and** family-disjoint: it is
+strictly stricter than `no_overlap`, which is family-disjoint but has no temporal constraint.
 
 ```bash
 python -m src.data.generate_splits --config trial_config_v3_higraph_temporal
@@ -348,9 +349,14 @@ bash scripts/run_temporal_training.sh      # backbone + all heads + baselines
 bash scripts/run_temporal_evaluation.sh    # per-year (2019, 2020, 2021) + combined
 ```
 
-The split file records the exact train/val sample hashes in
-`dataset_config_split/higraph/trial_config_v3/temporal_split.json`, and FAMCF and AndroFIM
-filter on those hashes so every model sees the same samples.
+The split file records the exact train/val sample hashes, plus the indices and names of the
+unseen test families, in `dataset_config_split/higraph/trial_config_v3/temporal_split.json`.
+FAMCF and AndroFIM filter on those hashes so every model sees the same samples.
+
+`run_temporal_evaluation.sh` reports a combined 2019–2021 result and a per-year breakdown.
+A year is skipped when it contains fewer unseen families than `--n_way`, which is expected:
+most families appearing in a given year were already present before 2019, so only the
+combined pool is reliably large enough for 5-way episodes.
 
 ---
 
@@ -459,9 +465,9 @@ Configs are defined in `src/core/experiment_configs.py`. The main configs are:
 | `trial_config_v3_higraph_temporal`      | HiGraph (2012–2021) | Temporal          |
 
 The `no_overlap` configs use a 60/20/20 base/val/novel family split with seed 42, so evaluation
-families are never seen in training. The `temporal` config instead splits by time: it trains on
-an 80/20 sample-level split of 2012–2018 and evaluates on *all* families from 2019–2021,
-including ones seen during training.
+families are never seen in training. The `temporal` config adds a time constraint on top: it
+trains on an 80/20 sample-level split of 2012–2018 and evaluates only on families from
+2019–2021 that never appear in 2012–2018.
 
 ---
 
@@ -473,7 +479,7 @@ Each result table maps to one command, assuming the corresponding training step 
 | ---------------------------------------- | -------------------------------------------------------------- |
 | Main comparison across all three corpora | `bash scripts/run_evaluation.sh`                                 |
 | Additional pooling comparisons           | `bash scripts/run_full_evaluation.sh`                            |
-| Temporal generalization                  | `bash scripts/run_temporal_evaluation.sh`                        |
+| Temporal generalization (unseen families)| `bash scripts/run_temporal_evaluation.sh`                        |
 | SDL structural-prior ablations           | `bash scripts/run_ablation_evaluation.sh`                        |
 | Pretraining component ablation           | `bash scripts/run_full_evaluation.sh`                            |
 | Open-set evaluation                      | `python -m src.robustness.episodic_openset_evaluate`             |
