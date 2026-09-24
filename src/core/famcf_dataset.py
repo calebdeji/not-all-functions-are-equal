@@ -86,7 +86,7 @@ class FAMCFDataset(Dataset):
     """
 
     def __init__(self, samples_csv: str, features_pkl: str, families: set,
-                 family_to_idx: dict):
+                 family_to_idx: dict, hash_filter: set = None):
         df = pd.read_csv(samples_csv)
         df["family"] = df["family"].str.lower().str.strip()
         df = df[df["family"].isin(families)].reset_index(drop=True)
@@ -97,6 +97,8 @@ class FAMCFDataset(Dataset):
             all_features = pickle.load(f)
 
         hash_col = "sha256" if "sha256" in df.columns else "hash"
+        if hash_filter is not None:
+            df = df[df[hash_col].isin(hash_filter)].reset_index(drop=True)
 
         self.samples = []
         self.labels  = []

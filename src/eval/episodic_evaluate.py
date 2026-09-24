@@ -36,7 +36,7 @@ from torch.utils.data import Subset
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-from src.core.backbone import Backbone
+from src.core.backbone import Backbone, FlatFCGBackbone
 from src.core.experiment_configs import ExperimentConfig
 from src.core.utils import Utils, ModelParameters, _FLAT_DATASET_NAMES
 from src.core.parse_dataset import HiGraphDataset, HiGraphData, get_dataset_root
@@ -48,6 +48,11 @@ from src.core.episodic_models import (
     SDLWithoutLearnableParamModel,
     SDLComplexityPriorModel,
     SDLWithoutStructureModel,
+    SDLPageRankModel,
+    GMTModel,
+    GMPoolModel,
+    TopKPoolModel,
+    DiffPoolModel,
     _scatter_mean,
     _scatter_softmax,
 )
@@ -294,7 +299,7 @@ class OnTheFlyFewShotEvaluator:
         node_prototypes = F.normalize(node_prototypes, p=2, dim=-1)
 
         # Graph prototypes for classification
-        sup_graph_embs = self._pool_nodes(sup_node_embs, sup_fcg_batch, sup_weights)
+        sup_graph_embs = self._pool_nodes(sup_node_embs, sup_fcg_batch, sup_weights, data=support_data)
         graph_prototypes = _scatter_mean(sup_graph_embs, support_data.family_class, dim=0)
         graph_prototypes = F.normalize(graph_prototypes, p=2, dim=-1)
 
@@ -302,11 +307,12 @@ class OnTheFlyFewShotEvaluator:
         query_node_embs, query_fcg_batch = self.model.get_node_embeddings(query_data)
 
         query_weights = self._compute_query_weights(
-            query_node_embs, node_prototypes, query_data
+            query_node_embs, node_prototypes, query_data,
+            fcg_batch=query_fcg_batch,
         )
 
         query_graph_embs = self._pool_nodes(
-            query_node_embs, query_fcg_batch, query_weights
+            query_node_embs, query_fcg_batch, query_weights, data=query_data
         )
 
         # Classify by cosine similarity to graph prototypes
@@ -372,6 +378,19 @@ class OnTheFlyFewShotEvaluator:
         model = self.model
 
 
+        if isinstance(model, SDLPageRankModel):
+            return TrainingUtils.generate_sdl_pagerank_weights(
+                node_embeddings=node_embs,
+                node_labels=node_labels,
+                edge_index=data.fcg_edge_index,
+                fcg_batch=fcg_batch,
+                lambda_a_val=model.raw_lambda_a,
+                lambda_b_val=model.raw_lambda_b,
+            )
+
+        if isinstance(model, (GMTModel, GMPoolModel, TopKPoolModel, DiffPoolModel)):
+            return torch.ones(node_embs.size(0), device=node_embs.device)
+
         if isinstance(model, SelfAttentionModel):
             return TrainingUtils.generate_task_specific_weights(
                 node_embs, node_labels, fcg_batch, temp=5.0,
@@ -417,8 +436,21 @@ class OnTheFlyFewShotEvaluator:
 
         raise ValueError(f'Unknown model type: {type(model).__name__}')
 
-    def _compute_query_weights(self, query_node_embs, node_prototypes, data):
+    def _compute_query_weights(self, query_node_embs, node_prototypes, data, fcg_batch=None):
         model = self.model
+
+        if isinstance(model, SDLPageRankModel):
+            return TrainingUtils.generate_sdl_pagerank_evaluation_weights(
+                query_node_embeddings=query_node_embs,
+                support_prototypes=node_prototypes,
+                edge_index=data.fcg_edge_index,
+                fcg_batch=fcg_batch,
+                lambda_a_val=model.raw_lambda_a,
+                lambda_b_val=model.raw_lambda_b,
+            )
+
+        if isinstance(model, (GMTModel, GMPoolModel, TopKPoolModel, DiffPoolModel)):
+            return torch.ones(query_node_embs.size(0), device=query_node_embs.device)
 
         if isinstance(model, SelfAttentionModel):
             return TrainingUtils.generate_evaluation_weights(
@@ -504,8 +536,11 @@ class OnTheFlyFewShotEvaluator:
         torch.save(combined, path)
         print(f'Weight records saved → {path}  ({len(self._weight_records)} episodes, {combined["family"].size(0)} nodes)')
 
-    def _pool_nodes(self, node_embs, batch, weights):
+    def _pool_nodes(self, node_embs, batch, weights, data=None):
         """Pool nodes using model-specific strategy."""
+        if isinstance(self.model, (GMTModel, GMPoolModel, TopKPoolModel, DiffPoolModel)):
+            return self.model.forward_attention(node_embs, batch, edge_index=data.fcg_edge_index)
+
         if isinstance(self.model, SelfAttentionModel):
             # Self-attention uses its own MLP; external weights not used
             return self.model.forward_attention(node_embeddings=node_embs, batch=batch)
@@ -661,7 +696,7 @@ def _evaluate_famcf_episode(famcf_encoders, sup_data, qry_data, hash_to_features
 # Unified evaluation pipeline — all models on the same episodes
 # ---------------------------------------------------------------------------
 
-_SDL_TYPES = (SDLDegreeModel, SDLComplexityModel)
+_SDL_TYPES = (SDLDegreeModel, SDLComplexityModel, SDLPageRankModel)
 
 
 def _run_unified_episodes(evaluators, fcgat, dataset, indices_by_class,
@@ -756,6 +791,19 @@ def _run_unified_episodes(evaluators, fcgat, dataset, indices_by_class,
             completed += 1
             pbar.update(1)
             pbar.set_postfix({n: f'{np.mean(a):.3f}' for n, a in all_accs.items()})
+
+            if completed % 20 == 0:
+                logger.info(f'  --- Checkpoint @ episode {completed}/{n_episodes} [{label_prefix}] {n_way}-way {k_shot}-shot ---')
+                for _name, _accs in all_accs.items():
+                    if not _accs:
+                        continue
+                    _mean = float(np.mean(_accs))
+                    _ci   = float(st.t.interval(
+                        0.95, df=len(_accs) - 1, loc=_mean, scale=st.sem(_accs),
+                    )[1] - _mean) if len(_accs) > 1 else 0.0
+                    logger.info(
+                        f'    [{_name}] {_mean * 100:.2f}% ± {_ci * 100:.2f}%  ({len(_accs)} eps)'
+                    )
 
         pbar.close()
 
@@ -878,10 +926,70 @@ def run_unified_evaluation(
             idx_to_family=_build_idx_to_family(test_ds),
         )
 
+    elif params.dataset_split_type == DatasetType.Temporal:
+        logger.info(f'Dataset split type: temporal — evaluating on all families from test years {params.test_years}')
+
+        # ---- Per-year evaluation ----
+        logger.info(f'\n--- Per-year temporal evaluation ---')
+        for year in params.test_years:
+            year_ds = HiGraphDataset(root=get_dataset_root(), year=year)
+            year_labels = year_ds.get_labels()
+            year_indices_by_class = defaultdict(list)
+            for i, lbl in enumerate(year_labels.tolist()):
+                year_indices_by_class[lbl].append(i)
+
+            n_year_families = len(year_indices_by_class)
+            logger.info(f'Year {year} — families: {n_year_families}  samples: {len(year_labels)}')
+
+            if n_year_families < n_way:
+                logger.warning(f'  Skipping year {year}: only {n_year_families} families (need {n_way})')
+                continue
+
+            year_subset = Subset(year_ds, list(range(len(year_ds))))
+            results[f'year_{year}'] = _run_unified_episodes(
+                evaluators, fcgat, year_subset, year_indices_by_class,
+                n_way, n_shots, n_query, n_episodes, device, f'year_{year}', logger,
+                tracker=tracker,
+                pretrained_backbones=pretrained_backbones,
+                androfim_backbone=androfim_backbone, hash_to_path=hash_to_path,
+                famcf_encoders=famcf_encoders, hash_to_features=hash_to_features,
+                idx_to_family={v: k for k, v in year_ds.get_family_mapping().items()},
+            )
+
+        # ---- Combined evaluation across all test years ----
+        logger.info(f'\n--- Combined temporal evaluation ({params.test_years}) ---')
+        _, _, test_ds = Utils.get_splits(params)
+
+        from torch.utils.data import ConcatDataset
+        inner = test_ds.dataset if isinstance(test_ds, Subset) else test_ds
+        if isinstance(inner, ConcatDataset):
+            all_labels = torch.cat([ds.get_labels() for ds in inner.datasets])
+        else:
+            all_labels = inner.get_labels()
+        subset_labels = all_labels[torch.tensor(test_ds.indices, dtype=torch.long)]
+
+        indices_by_class = defaultdict(list)
+        for i, lbl in enumerate(subset_labels.tolist()):
+            indices_by_class[lbl].append(i)
+
+        n_families = len(indices_by_class)
+        logger.info(f'Temporal test set (combined) — families: {n_families}  samples: {len(subset_labels)}')
+
+        if n_families < n_way:
+            logger.warning(f'Skipping combined: only {n_families} families (need {n_way})')
+        else:
+            results['test_split'] = _run_unified_episodes(
+                evaluators, fcgat, test_ds, indices_by_class,
+                n_way, n_shots, n_query, n_episodes, device, 'test_split', logger,
+                tracker=tracker,
+                pretrained_backbones=pretrained_backbones,
+                androfim_backbone=androfim_backbone, hash_to_path=hash_to_path,
+                famcf_encoders=famcf_encoders, hash_to_features=hash_to_features,
+                idx_to_family=_build_idx_to_family(test_ds),
+            )
+
     else:
         logger.error(f'Dataset split type: {params.dataset_split_type.value} — not supported')
-
-        
 
     if export_weights_dir is not None:
         os.makedirs(export_weights_dir, exist_ok=True)
@@ -916,6 +1024,10 @@ def main():
     parser.add_argument('--export_weights_dir', default=None,
                         help='Directory to save per-function weight records (.pt) for sdl_complexity, '
                              'sdl_degree, and self_attention. One file per variant.')
+    parser.add_argument('--all_models', action='store_true',
+                        help='Evaluate every model in one run (BASELINE_REGISTRY + ABLATION_REGISTRY + '
+                             'Group A/B backbone ablations + FCGAT + FAMCF + AndroFIM). '
+                             'Ensures all models are compared on identical episodes.')
     parser.add_argument('--ablation_only', action='store_true',
                         help='Only evaluate ablation models (no FCGAT, AndoFIM, or FAMCF).')
     args = parser.parse_args()
@@ -936,7 +1048,12 @@ def main():
     
     now = time.strftime('%Y%m%d_%H%M%S')
     
-    log_path = os.path.join(log_dir,  f'evaluate_{now}.log' if not args.ablation_only else f'evaluate_ablation_{now}.log')
+    if args.all_models:
+        log_path = os.path.join(log_dir, f'evaluate_all_models_{now}.log')
+    elif args.ablation_only:
+        log_path = os.path.join(log_dir, f'evaluate_ablation_{now}.log')
+    else:
+        log_path = os.path.join(log_dir, f'evaluate_{now}.log')
     logger = Utils.setup_logger(f'unified_eval_{frozen_str}_{params.dataset_split_type.value}', log_path)
 
     logger.info(f'Config: {params.id}  Dataset split type: {params.dataset_split_type.value}  '
@@ -957,7 +1074,12 @@ def main():
     # Load all available episodic head variants
     episodic_models = {}
     episode_train_only = {}
-    REGISTRY = {**ABLATION_REGISTRY, **SDL_REGISTRY} if args.ablation_only else BASELINE_REGISTRY
+    if args.ablation_only:
+        REGISTRY = {**ABLATION_REGISTRY, **SDL_REGISTRY}
+    elif args.all_models:
+        REGISTRY = {**BASELINE_REGISTRY, **ABLATION_REGISTRY}
+    else:
+        REGISTRY = BASELINE_REGISTRY
     for variant in REGISTRY.keys():
         model_path = Utils.get_episodic_model_path(params, variant, args.freeze_backbone)
         if not os.path.exists(model_path):
@@ -973,7 +1095,7 @@ def main():
     # Load FCGAT if available
     fcgat = None
     fcgat_path = Utils.get_fcgat_model_saved_path(params)
-    if os.path.exists(fcgat_path) and not args.ablation_only:
+    if os.path.exists(fcgat_path) and (not args.ablation_only or args.all_models):
         fcgat = StandaloneFCGAT(
             cfg_dim=params.cfg_dim,
             func_feat_dim=params.func_feat_dim,
@@ -988,7 +1110,7 @@ def main():
     pretrained_backbones = {}
 
     whole_graph_path = Utils.get_whole_graph_backbone_model_saved_path(params)
-    if os.path.exists(whole_graph_path) and not args.ablation_only:
+    if os.path.exists(whole_graph_path) and (not args.ablation_only or args.all_models):
         bb = Backbone(
             cfg_dim=params.cfg_dim,
             func_feat_dim=params.func_feat_dim,
@@ -1021,15 +1143,99 @@ def main():
     else:
         logger.info(f'  Pretrained backbone not found at {pretrained_path}, skipping')
 
+    # Granular ablation backbones (Group A — frozen, no episodic fine-tuning)
+    _ablation_bb_paths = {
+        'flat_fcg':       Utils.get_flat_fcg_backbone_model_saved_path(params),
+        'set_only':       Utils.get_set_only_backbone_model_saved_path(params),
+        'instance_only':  Utils.get_instance_only_backbone_model_saved_path(params),
+    }
+    _ablation_bb_labels = {
+        'flat_fcg':      'flat FCG (no CFG, full pretraining)',
+        'set_only':      'set-only (set-level NT-Xent only)',
+        'instance_only': 'instance-only (instance-level NT-Xent only)',
+    }
+    for _prefix, _bb_path in _ablation_bb_paths.items():
+        if os.path.exists(_bb_path):
+            if _prefix == 'flat_fcg':
+                _bb = FlatFCGBackbone(
+                    func_feat_dim=params.func_feat_dim,
+                    fcg_hidden_channels=params.fcg_hidden_channels,
+                    final_channels=params.final_channels,
+                    dropout_value=params.dropout,
+                ).to(device)
+            else:
+                _bb = Backbone(
+                    cfg_dim=params.cfg_dim,
+                    func_feat_dim=params.func_feat_dim,
+                    cfg_hidden_channels=params.cfg_hidden_channels,
+                    fcg_hidden_channels=params.fcg_hidden_channels,
+                    final_channels=params.final_channels,
+                    dropout_value=params.dropout,
+                ).to(device)
+            _bb.load_state_dict(torch.load(_bb_path, map_location=device))
+            _bb.eval()
+            pretrained_backbones[f'{_prefix}_backbone'] = _bb
+            logger.info(f'  Loaded {_ablation_bb_labels[_prefix]}')
+        else:
+            logger.info(f'  {_prefix}_backbone not found at {_bb_path}, skipping')
+
+    # Granular ablation episodic models (Group B — fine-tuned on each Group A backbone)
+    _ablation_ft_paths = {
+        'flat_fcg':      Utils.get_flat_fcg_backbone_model_saved_path(params),
+        'whole_graph':   Utils.get_whole_graph_backbone_model_saved_path(params),
+        'set_only':      Utils.get_set_only_backbone_model_saved_path(params),
+        'instance_only': Utils.get_instance_only_backbone_model_saved_path(params),
+        'random_init':   None,   # no contrastive-pretrained backbone; episodic ckpt holds full model
+    }
+    _ablation_ft_variants = ['sdl_complexity']
+
+    for _prefix, _bb_path in _ablation_ft_paths.items():
+        if _bb_path is not None and not os.path.exists(_bb_path):
+            logger.info(f'  {_prefix} backbone missing — skipping Group B variants')
+            continue
+        for _variant in _ablation_ft_variants:
+            _variant_key = f'{_prefix}_{_variant}'
+            _model_path = Utils.get_episodic_model_path(params, _variant_key, args.freeze_backbone)
+            if not os.path.exists(_model_path):
+                logger.info(f'  {_variant_key} not found at {_model_path}, skipping')
+                continue
+            if _prefix == 'flat_fcg':
+                _bb_ft = FlatFCGBackbone(
+                    func_feat_dim=params.func_feat_dim,
+                    fcg_hidden_channels=params.fcg_hidden_channels,
+                    final_channels=params.final_channels,
+                    dropout_value=params.dropout,
+                ).to(device)
+            else:
+                _bb_ft = Backbone(
+                    cfg_dim=params.cfg_dim,
+                    func_feat_dim=params.func_feat_dim,
+                    cfg_hidden_channels=params.cfg_hidden_channels,
+                    fcg_hidden_channels=params.fcg_hidden_channels,
+                    final_channels=params.final_channels,
+                    dropout_value=params.dropout,
+                ).to(device)
+            if _bb_path is not None:
+                # Redundant with the full-model load below (episodic ckpt saves
+                # backbone+head); skipped for random_init, which has no backbone ckpt.
+                _bb_ft.load_state_dict(torch.load(_bb_path, map_location=device))
+            _bb_ft.eval()
+            _model = create_model(_variant, _bb_ft, fcg_dim=params.final_channels).to(device)
+            _model.load_state_dict(torch.load(_model_path, map_location=device))
+            _model.eval()
+            episodic_models[_variant_key] = _model
+            logger.info(f'  Loaded {_variant_key}')
+
+
     # Load FAMCF encoders + build hash→features lookup
-    famcf_encoders = {} if not args.ablation_only else None
+    famcf_encoders = {} if (not args.ablation_only or args.all_models) else None
     hash_to_features = None
     famcf_save_dir = Utils.get_famcf_save_dir(params.id, params.dataset_name, params.dataset_split_type.value)
     famcf_features_pkl = os.path.join(
         Utils.get_project_root(), 'dataset', params.dataset_name, 'famcf', 'features.pkl'
     )
     _short = {"permission": "per", "api_call": "api", "opcode": "opc"}
-    if not args.ablation_only:
+    if not args.ablation_only or args.all_models:
         for ft, short in _short.items():
             enc_path = os.path.join(famcf_save_dir, f'encoder_{short}.pth')
             cfg_path = os.path.join(famcf_save_dir, f'model_config_{ft}.json')
@@ -1065,7 +1271,7 @@ def main():
     androfim_ckpt_path     = Path(args.androfim_ckpt if args.androfim_ckpt is not None else _default_ckpt)
     androfim_manifest_path = Path(args.androfim_manifest) if args.androfim_manifest is not None \
                              else Path(Utils.get_androfim_manifest(params.dataset_name))
-    if androfim_ckpt_path.exists() and androfim_manifest_path.exists() and not args.ablation_only:
+    if androfim_ckpt_path.exists() and androfim_manifest_path.exists() and (not args.ablation_only or args.all_models):
         androfim_backbone = _load_androfim_backbone(str(androfim_ckpt_path), device=device)
         img_root  = androfim_manifest_path.parent
         flat = params.dataset_split_type == DatasetType.NoOverlap and params.dataset_name != 'higraph'
@@ -1127,7 +1333,12 @@ def main():
     print(report)
     logger.info(report)
 
-    report_path = os.path.join(log_dir, 'resource_report.txt' if not args.ablation_only else 'resource_report_ablation.txt')
+    if args.all_models:
+        report_path = os.path.join(log_dir, 'resource_report_all_models.txt')
+    elif args.ablation_only:
+        report_path = os.path.join(log_dir, 'resource_report_ablation.txt')
+    else:
+        report_path = os.path.join(log_dir, 'resource_report.txt')
     with open(report_path, 'w') as f:
         f.write(report)
     logger.info(f'Resource report saved to {report_path}')

@@ -3,6 +3,46 @@ import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv, global_add_pool, global_mean_pool, LayerNorm
 
 
+class FlatFCGBackbone(torch.nn.Module):
+    """
+    FCG-only backbone: no CFG GNN. Projects function_features directly into the FCG GNN.
+    Used for the granular component ablation (Row 1 & 2) to isolate the contribution
+    of hierarchical graph modeling (CFG level) vs. flat FCG encoding.
+    Output shape is identical to Backbone: (num_functions, final_channels).
+    """
+
+    def __init__(self, func_feat_dim, fcg_hidden_channels, final_channels, dropout_value):
+        super(FlatFCGBackbone, self).__init__()
+        self.fcg_proj = torch.nn.Linear(func_feat_dim, fcg_hidden_channels)
+        self.fcg_conv1 = SAGEConv(fcg_hidden_channels, fcg_hidden_channels)
+        self.fcg_conv2 = SAGEConv(fcg_hidden_channels, final_channels)
+        self.dropout = torch.nn.Dropout(dropout_value)
+
+    def forward(self, data, return_node_embeddings=False):
+        function_features = data.function_features
+        num_functions = function_features.shape[0]
+
+        f_x = F.relu(self.fcg_proj(function_features))
+        f_x = self.fcg_conv1(f_x, data.fcg_edge_index)
+        f_x = F.relu(f_x)
+        f_x = self.fcg_conv2(f_x, data.fcg_edge_index)
+        f_x = F.relu(f_x)
+        f_x = self.dropout(f_x)
+
+        if hasattr(data, 'num_graphs'):
+            fcg_batch = torch.repeat_interleave(
+                torch.arange(data.num_graphs, device=function_features.device),
+                data.num_functions,
+            )
+        else:
+            fcg_batch = torch.zeros(num_functions, device=function_features.device, dtype=torch.long)
+
+        if return_node_embeddings:
+            return f_x, fcg_batch
+
+        return global_mean_pool(f_x, fcg_batch), fcg_batch
+
+
 class BackboneProjectionHead(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels):
         super(BackboneProjectionHead, self).__init__()

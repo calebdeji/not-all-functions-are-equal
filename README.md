@@ -22,8 +22,20 @@ The core contribution is **Structure-Discriminative Landmark (SDL)** weighting �
 | `self_attention` | Learnable MLP attention                                   |
 | `sdl_complexity` | `sigmoid(λa·sim_in + λb·cyclomatic_complexity − sim_out)` |
 | `sdl_degree`     | `sigmoid(λa·sim_in + λb·in_degree − sim_out)`             |
+| `sdl_pagerank`   | `sigmoid(λa·sim_in + λb·pagerank − sim_out)`              |
 
-λa and λb are learned scalars. `sim_in` = similarity to the function's class prototype; `sim_out` = similarity to other classes.
+λa and λb are learned scalars. `sim_in` = similarity to the function's class prototype; `sim_out` = similarity to other classes. The three SDL variants differ only in the structural prior (`cyclomatic_complexity`, `in_degree`, `pagerank`); PageRank is computed per episode by power iteration over the FCG.
+
+### Graph-pooling baselines
+
+Learned readouts trained on the same pre-trained backbone, for comparison against SDL:
+
+| Variant      | Description                                                              |
+| ------------ | ------------------------------------------------------------------------ |
+| `gmt`        | Graph Multiset Transformer — `GMPool_G → SelfAtt → GMPool_1`             |
+| `gmpool`     | Graph Multiset Pooling only — `GMPool_G → mean over seeds`               |
+| `topk_pool`  | TopKPooling — learned node scoring, gated mean readout                    |
+| `diff_pool`  | DiffPool — soft cluster assignment, with link-prediction + entropy losses |
 
 ---
 
@@ -70,7 +82,15 @@ dataset_refined_truth/
 ├── raw_format/                 # Raw APK files (see below)
 ├── dataset_config_split/       # Train/val/test family splits (generated)
 ├── trained_models/             # Model checkpoints
-├── src/                        # All source code
+├── results/                    # Evaluation logs, figures, result sheets
+├── src/                        # All source code, grouped by pipeline stage
+│   ├── core/                   # Models, backbone, datasets, config, shared utils
+│   ├── data/                   # APK → graph / image / feature extraction, splits
+│   ├── pretrain/               # Contrastive backbone pre-training, DINO
+│   ├── train/                  # Episodic heads and baseline training
+│   ├── eval/                   # Unified few-shot evaluation
+│   ├── robustness/             # Open-set and obfuscation evaluation
+│   └── analysis/               # Interpretability, weight stability, result sheets
 └── scripts/                    # Training and evaluation shell scripts
 ```
 
@@ -98,9 +118,9 @@ raw_format/
 HiGraph APKs can be downloaded from [AndroZoo](https://androzoo.uni.lu) using the provided script:
 
 ```bash
-python src/download_apks.py --api_key YOUR_ANDROZOO_KEY
-python src/download_apks.py --api_key YOUR_ANDROZOO_KEY --year 2019   # single year
-python src/download_apks.py --api_key YOUR_ANDROZOO_KEY --workers 4   # parallel
+python -m src.data.download_apks --api_key YOUR_ANDROZOO_KEY
+python -m src.data.download_apks --api_key YOUR_ANDROZOO_KEY --year 2019   # single year
+python -m src.data.download_apks --api_key YOUR_ANDROZOO_KEY --workers 4   # parallel
 ```
 
 ### Flat datasets (MalDroid, KronoDroid)
@@ -146,14 +166,14 @@ Parses each APK into a JSON graph file using Androguard:
 
 ```bash
 # HiGraph (all years)
-python src/apk_to_higraph.py
+python -m src.data.apk_to_higraph
 
 # HiGraph (specific years)
-python src/apk_to_higraph.py --years 2019 2020 2021
+python -m src.data.apk_to_higraph --years 2019 2020 2021
 
 # MalDroid / KronoDroid
-python src/apk_to_higraph.py --dataset maldroid
-python src/apk_to_higraph.py --dataset kronodroid
+python -m src.data.apk_to_higraph --dataset maldroid
+python -m src.data.apk_to_higraph --dataset kronodroid
 ```
 
 Output:
@@ -165,9 +185,9 @@ Output:
 **This must be run before training any model.** It computes a disjoint 60/20/20 train/val/test split at the family level and saves it to `dataset_config_split/`. All models (backbone, episodic heads, FAMCF, AndroFIM) read from this file to ensure they train and evaluate on identical partitions.
 
 ```bash
-python src/generate_splits.py --config trial_config_v3_higraph_no_overlap
-python src/generate_splits.py --config trial_config_v3_maldroid_no_overlap
-python src/generate_splits.py --config trial_config_v3_kronodroid_no_overlap
+python -m src.data.generate_splits --config trial_config_v3_higraph_no_overlap
+python -m src.data.generate_splits --config trial_config_v3_maldroid_no_overlap
+python -m src.data.generate_splits --config trial_config_v3_kronodroid_no_overlap
 ```
 
 If this step is skipped, the graph training pipeline will generate the split as a side effect, but AndroFIM and FAMCF will fail with a `FileNotFoundError` since they only read — they do not generate splits.
@@ -178,10 +198,10 @@ Extracts permission, API call, and opcode feature vectors from APKs. **Required 
 
 ```bash
 # HiGraph
-python src/extract_famcf_features.py --apk_root raw_format/higraph --out_dir dataset/higraph/famcf
+python -m src.data.extract_famcf_features --apk_root raw_format/higraph --out_dir dataset/higraph/famcf
 
 # MalDroid / KronoDroid
-python src/extract_famcf_features.py --apk_root raw_format/maldroid --out_dir dataset/maldroid/famcf
+python -m src.data.extract_famcf_features --apk_root raw_format/maldroid --out_dir dataset/maldroid/famcf
 ```
 
 ### 4. Convert APKs to AndroFIM Images
@@ -190,11 +210,11 @@ Converts APK bytecode to RGB visualisation images. **Required before running the
 
 ```bash
 # HiGraph
-python src/apk_to_androFIM_image.py
+python -m src.data.apk_to_androFIM_image
 
 # Flat datasets
-python src/apk_to_androFIM_image.py --dataset maldroid
-python src/apk_to_androFIM_image.py --dataset kronodroid
+python -m src.data.apk_to_androFIM_image --dataset maldroid
+python -m src.data.apk_to_androFIM_image --dataset kronodroid
 ```
 
 Output layout:
@@ -221,7 +241,7 @@ Training stages in order:
 1. **Generate splits** — disjoint family train/val/test split
 2. **Whole-graph backbone** — instance-level NT-Xent contrastive pre-training
 3. **Full backbone** — instance + set-level NT-Xent contrastive pre-training
-4. **Episodic heads** — N-way K-shot fine-tuning (`self_attention`, `sdl_complexity`, `sdl_degree`)
+4. **Episodic heads** — N-way K-shot fine-tuning (`self_attention`, `sdl_complexity`, `sdl_degree`, `sdl_pagerank`)
 5. **FAMCF encoders** — triplet contrastive training on permission/API/opcode features
 6. **AndroFIM** — DINO self-supervised pre-training → fine-tune on base families
 7. **FCGAT** — supervised pre-training of the adapted FCGAT baseline
@@ -230,6 +250,25 @@ Model checkpoints are saved to:
 
 ```
 trained_models/{config_id}/{dataset}/{split_type}/{variant}/model.pth
+```
+
+To train **everything** in dependency order — all backbones, all baselines, all episodic
+heads and the granular-ablation ladder — use the master script instead:
+
+```bash
+bash scripts/run_full_training.sh          # full pipeline
+bash scripts/run_full_training.sh reset    # clear progress markers and start over
+```
+
+`run_full_training.sh`, and the other long-running scripts, record completed steps in a
+`*_progress.txt` file at the repository root, so an interrupted run resumes where it
+stopped rather than retraining from scratch.
+
+The graph-pooling baselines and the granular ablation have their own scripts:
+
+```bash
+bash scripts/run_graph_pooling_training.sh      # gmt, gmpool, topk_pool, diff_pool
+bash scripts/run_rebuttal_ablation_training.sh  # flat-FCG / set-only / instance-only ladder
 ```
 
 ---
@@ -251,8 +290,10 @@ All models are evaluated on the same support/query split per episode.
 
 ### Models evaluated
 
-- Episodic heads: `self_attention`, `sdl_complexity`, `sdl_degree` (and ablations)
+- Episodic heads: `self_attention`, `sdl_complexity`, `sdl_degree`, `sdl_pagerank` (and SDL ablations)
+- Graph-pooling baselines: `gmt`, `gmpool`, `topk_pool`, `diff_pool`
 - Pretrained backbones: `whole_graph_backbone`, `pretrained_backbone`
+- Granular-ablation backbones and heads: `flat_fcg`, `set_only`, `instance_only`, `random_init`
 - `FCGAT` baseline
 - `AndroFIM` baseline (image-based ResNet-12, multi-crop ProtoNet)
 - `FAMCF` baseline (soft-voting across permission/API/opcode encoders)
@@ -268,32 +309,196 @@ All models are evaluated on the same support/query split per episode.
 bash scripts/run_evaluation.sh
 
 # Or directly:
-python src/episodic_evaluate.py \
+python -m src.eval.episodic_evaluate \
     --config trial_config_v3_higraph_no_overlap \
     --n_shots 1 5 \
     --n_episodes 500
+```
+
+Three model selections are available:
+
+| Flag              | Models evaluated                                                  |
+| ----------------- | ----------------------------------------------------------------- |
+| *(none)*          | Main comparison: SDL variants, self-attention, pooling baselines   |
+| `--ablation_only` | SDL component ablations only (no FCGAT / FAMCF / AndroFIM)         |
+| `--all_models`    | Everything, incl. granular-ablation backbones and heads            |
+
+Use `--all_models` when results must be directly comparable — it evaluates every model on the
+*same* episodes in a single run, avoiding the sampling differences that arise across separate
+runs:
+
+```bash
+bash scripts/run_full_evaluation.sh
+```
+
+Logs are timestamped (`results/…/evaluate_all_models_{timestamp}.log`) and a running
+mean ± CI is printed every 20 episodes, so a long run can be monitored while in progress.
+
+---
+
+## Temporal Evaluation
+
+Trains on pre-2019 data and evaluates on 2019–2021, measuring generalization to families as
+they appear over time. Unlike the `no_overlap` setting, test families may also occur in
+training; the split is by *time*, not by family.
+
+```bash
+python -m src.data.generate_splits --config trial_config_v3_higraph_temporal
+bash scripts/run_temporal_training.sh      # backbone + all heads + baselines
+bash scripts/run_temporal_evaluation.sh    # per-year (2019, 2020, 2021) + combined
+```
+
+The split file records the exact train/val sample hashes in
+`dataset_config_split/higraph/trial_config_v3/temporal_split.json`, and FAMCF and AndroFIM
+filter on those hashes so every model sees the same samples.
+
+---
+
+## Open-Set Evaluation
+
+Measures whether a model can tell a known family from one it has never seen. Each episode adds
+*intruder* queries drawn from families outside the episode's support set, and the decision
+threshold is calibrated on the validation split to accept 95% of known queries.
+
+```bash
+python -m src.robustness.episodic_openset_evaluate \
+    --config trial_config_v3_higraph_no_overlap \
+    --n_shots 1 5 --n_intruder 15 --n_episodes 500 --n_cal 200
+```
+
+Reports, per model and shot count: closed-set accuracy on known queries, AUROC for
+known-vs-intruder, FPR at 95% TPR, and open-set macro-F1 at the calibrated threshold.
+
+---
+
+## Obfuscation Robustness
+
+Evaluates degradation under three structural transformations applied with
+[Obfuscapk](https://github.com/ClaudiuGeorgiu/Obfuscapk) — `ArithmeticBranch` (dead-code
+insertion), `CallIndirection` (call-graph pollution), and `Reorder` (basic-block reordering).
+Obfuscapk is an external tool and must be installed separately.
+
+Each obfuscated APK is paired with its clean counterpart and evaluated under identical
+episodes, so the reported Δ isolates the effect of the transformation rather than of
+episode sampling.
+
+```bash
+# 1. stage the novel-family APKs that still need obfuscating
+python -m src.data.prepare_novel_apks
+
+# 2. run Obfuscapk over the staged APKs (all years, or a year range)
+bash scripts/obfuscate_higraph.sh
+bash scripts/obfuscate_higraph.sh 2019 2021
+
+# 3. collect the newly obfuscated APKs into a novel-only folder per method
+python -m src.data.prepare_novel_apks --collect_only
+
+# 4. extract graphs, then FAMCF features and AndroFIM images, for each method
+bash scripts/run_obfuscation_extraction.sh
+bash scripts/run_obfuscation_famcf_androfim_extraction.sh
+
+# 5. evaluate
+python -m src.robustness.episodic_obfuscated_evaluate --config trial_config_v3_higraph_no_overlap
+python -m src.robustness.episodic_obfuscated_query_evaluate --config trial_config_v3_higraph_no_overlap
+```
+
+Step 4 encodes FAMCF features with the **clean** vocabulary (`--existing_vocab`) so that
+feature positions still line up with the trained encoders.
+
+The two evaluators differ in threat model:
+
+- `episodic_obfuscated_evaluate` — both support and query obfuscated (homogeneous).
+- `episodic_obfuscated_query_evaluate` — clean support, obfuscated query. This matches an
+  evasion setting, where a defender holds a curated clean reference set and the incoming
+  sample is obfuscated.
+
+---
+
+## Interpretability and Weight Stability
+
+Inspects which functions SDL actually up-weights, and how stable those weights are under
+obfuscation.
+
+```bash
+# pick consistently-correct and consistently-misclassified APKs, saving a replay episode
+python -m src.analysis.select_interpretability_apks
+
+# dump per-function weight decomposition for each selected APK
+python -m src.analysis.extract_sdl_weights
+
+# figures
+python -m src.analysis.plot_sdl_weights
+python -m src.analysis.plot_sdl_bars_simple
+
+# weight stability on matched functions, clean vs obfuscated
+python -m src.analysis.measure_weight_stability
+```
+
+`extract_sdl_weights` reports, per function:
+`weight | sim_max | sim_others | norm_complexity | raw_complexity | function_name`,
+so the contribution of the semantic and structural terms can be read off individually.
+
+Two further utilities:
+
+```bash
+python -m src.analysis.generate_result_sheets      # Excel summaries of the evaluation logs
+python -m src.analysis.count_placeholder_apks      # functions with no recoverable CFG
 ```
 
 ---
 
 ## Experiment Configs
 
-Configs are defined in `src/experiment_configs.py`. The main configs are:
+Configs are defined in `src/core/experiment_configs.py`. The main configs are:
 
 | Config                                  | Dataset             | Split             |
 | --------------------------------------- | ------------------- | ----------------- |
 | `trial_config_v3_higraph_no_overlap`    | HiGraph (2012–2021) | Disjoint families |
 | `trial_config_v3_maldroid_no_overlap`   | MalDroid            | Disjoint families |
 | `trial_config_v3_kronodroid_no_overlap` | KronoDroid          | Disjoint families |
+| `trial_config_v3_higraph_temporal`      | HiGraph (2012–2021) | Temporal          |
 
-All use a 60/20/20 base/val/novel family split with seed 42.
+The `no_overlap` configs use a 60/20/20 base/val/novel family split with seed 42, so evaluation
+families are never seen in training. The `temporal` config instead splits by time: it trains on
+an 80/20 sample-level split of 2012–2018 and evaluates on *all* families from 2019–2021,
+including ones seen during training.
+
+---
+
+## Reproducing the Reported Results
+
+Each result table maps to one command, assuming the corresponding training step has completed.
+
+| Result                                   | Command                                                        |
+| ---------------------------------------- | -------------------------------------------------------------- |
+| Main comparison across all three corpora | `bash scripts/run_evaluation.sh`                                 |
+| Additional pooling comparisons           | `bash scripts/run_full_evaluation.sh`                            |
+| Temporal generalization                  | `bash scripts/run_temporal_evaluation.sh`                        |
+| SDL structural-prior ablations           | `bash scripts/run_ablation_evaluation.sh`                        |
+| Pretraining component ablation           | `bash scripts/run_full_evaluation.sh`                            |
+| Open-set evaluation                      | `python -m src.robustness.episodic_openset_evaluate`             |
+| SDL weight decomposition                 | `python -m src.analysis.extract_sdl_weights`                     |
+| Per-episode inference cost               | any evaluation run — see `resource_report*.txt` in the log dir   |
+| Paired clean vs. obfuscated accuracy     | `python -m src.robustness.episodic_obfuscated_evaluate`          |
+| Weight stability under obfuscation       | `python -m src.analysis.measure_weight_stability`                |
+
+The three reviewer-response experiments — weight stability, the random-init control, and the
+clean-support/obfuscated-query evaluation — can be run together:
+
+```bash
+bash scripts/run_reviewer_experiments.sh
+```
 
 ---
 
 ## Dependencies
 
-- Python 3.10+
-- PyTorch 2.10
-- PyTorch Geometric 2.7
+- Python 3.13 (see `.python-version`)
+- PyTorch 2.10 · PyTorch Geometric 2.7 · torchvision 0.25
 - Androguard 4.1.3 (APK parsing)
-- See `requirements.txt` for full list
+- scikit-learn (open-set AUROC), matplotlib (figures), openpyxl (result sheets)
+- timm (required by the AndroFIM DINO pre-training entrypoint)
+- See `requirements.txt` for the full pinned list
+
+All entrypoints are run as modules from the repository root, e.g.
+`python -m src.train.episodic_train --config …`.

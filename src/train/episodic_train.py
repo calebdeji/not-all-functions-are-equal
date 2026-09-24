@@ -25,7 +25,7 @@ from torch.utils.data import Subset
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-from src.core.backbone import Backbone
+from src.core.backbone import Backbone, FlatFCGBackbone
 from src.core.experiment_configs import ExperimentConfig
 from src.core.utils import Utils, ModelParameters, DatasetType
 from src.core.parse_dataset import HiGraphData
@@ -37,6 +37,11 @@ from src.core.episodic_models import (
     SDLWithoutLearnableParamModel,
     SDLComplexityPriorModel,
     SDLWithoutStructureModel,
+    SDLPageRankModel,
+    GMTModel,
+    GMPoolModel,
+    TopKPoolModel,
+    DiffPoolModel,
     _scatter_mean,
     _scatter_add,
 )
@@ -74,24 +79,58 @@ SDL_REGISTRY = {
         'class': SDLComplexityModel,
         'needs_fcg_dim': False,
     },
+    'sdl_pagerank': {
+        'class': SDLPageRankModel,
+        'needs_fcg_dim': False,
+    },
 }
 
 MODEL_REGISTRY = {
-    
     'self_attention': {
         'class': SelfAttentionModel,
+        'needs_fcg_dim': True,
+    },
+    'gmt': {
+        'class': GMTModel,
+        'needs_fcg_dim': True,
+    },
+    'gmpool': {
+        'class': GMPoolModel,
+        'needs_fcg_dim': True,
+    },
+    'topk_pool': {
+        'class': TopKPoolModel,
+        'needs_fcg_dim': True,
+    },
+    'diff_pool': {
+        'class': DiffPoolModel,
         'needs_fcg_dim': True,
     },
     **SDL_REGISTRY,
     # Ablation variants
     **ABLATION_REGISTRY,
-    
 }
 
 
 BASELINE_REGISTRY = {
     'self_attention': {
         'class': SelfAttentionModel,
+        'needs_fcg_dim': True,
+    },
+    'gmt': {
+        'class': GMTModel,
+        'needs_fcg_dim': True,
+    },
+    'gmpool': {
+        'class': GMPoolModel,
+        'needs_fcg_dim': True,
+    },
+    'topk_pool': {
+        'class': TopKPoolModel,
+        'needs_fcg_dim': True,
+    },
+    'diff_pool': {
+        'class': DiffPoolModel,
         'needs_fcg_dim': True,
     },
     **SDL_REGISTRY,
@@ -161,6 +200,19 @@ def compute_support_weights(model, node_embs, node_labels, data, fcg_batch):
     """Compute per-node weights for the support set (labels known)."""
     
 
+    if isinstance(model, SDLPageRankModel):
+        return TrainingUtils.generate_sdl_pagerank_weights(
+            node_embeddings=node_embs,
+            node_labels=node_labels,
+            edge_index=data.fcg_edge_index,
+            fcg_batch=fcg_batch,
+            lambda_a_val=model.raw_lambda_a,
+            lambda_b_val=model.raw_lambda_b,
+        )
+
+    if isinstance(model, (GMTModel, GMPoolModel, TopKPoolModel, DiffPoolModel)):
+        return torch.ones(node_embs.size(0), device=node_embs.device)
+
     if isinstance(model, SelfAttentionModel):
         return TrainingUtils.generate_task_specific_weights(
             node_embs, node_labels, fcg_batch, temp=5.0,
@@ -206,8 +258,21 @@ def compute_support_weights(model, node_embs, node_labels, data, fcg_batch):
     raise ValueError(f'Unknown model type: {type(model).__name__}')
 
 
-def compute_query_weights(model, query_node_embs, node_prototypes, data):
+def compute_query_weights(model, query_node_embs, node_prototypes, data, fcg_batch=None):
     """Compute per-node weights for the query set (pseudo-labels from prototypes)."""
+
+    if isinstance(model, SDLPageRankModel):
+        return TrainingUtils.generate_sdl_pagerank_evaluation_weights(
+            query_node_embeddings=query_node_embs,
+            support_prototypes=node_prototypes,
+            edge_index=data.fcg_edge_index,
+            fcg_batch=fcg_batch,
+            lambda_a_val=model.raw_lambda_a,
+            lambda_b_val=model.raw_lambda_b,
+        )
+
+    if isinstance(model, (GMTModel, GMPoolModel, TopKPoolModel, DiffPoolModel)):
+        return torch.ones(query_node_embs.size(0), device=query_node_embs.device)
 
     if isinstance(model, SelfAttentionModel):
         return TrainingUtils.generate_evaluation_weights(
@@ -255,10 +320,13 @@ def compute_query_weights(model, query_node_embs, node_prototypes, data):
 
 def pool_nodes(model, node_embs, batch, weights, data=None):
     """Pool node embeddings to graph level using model-specific pooling."""
+    if isinstance(model, (GMTModel, GMPoolModel, TopKPoolModel, DiffPoolModel)):
+        return model.forward_attention(node_embs, batch, edge_index=data.fcg_edge_index)
+
     if isinstance(model, SelfAttentionModel):
         return model.forward_attention(node_embeddings=node_embs, batch=batch)
 
-    # All weighted variants (mean_pooling ignores weights internally)
+    # All weighted variants
     return model.forward_attention(node_embeddings=node_embs, batch=batch, weights=weights)
 
 
@@ -357,7 +425,8 @@ def episodic_step(model, support_data, query_data, aux_criterion,
     query_node_embs, query_fcg_batch = model.get_node_embeddings(query_data)
 
     query_weights = compute_query_weights(
-        model, query_node_embs, node_prototypes, query_data
+        model, query_node_embs, node_prototypes, query_data,
+        fcg_batch=query_fcg_batch,
     )
 
     query_graph_embs = pool_nodes(
@@ -375,6 +444,14 @@ def episodic_step(model, support_data, query_data, aux_criterion,
     loss_aux = aux_criterion(all_embs, all_labels)
 
     loss = loss_proto + lambda_sup * loss_aux
+
+    # 3. DiffPool auxiliary losses (L_LP + L_E) on both support and query graphs
+    if isinstance(model, DiffPoolModel):
+        loss = loss + model.compute_aux_loss(
+            sup_node_embs, sup_fcg_batch, support_data.fcg_edge_index
+        ) + model.compute_aux_loss(
+            query_node_embs, query_fcg_batch, query_data.fcg_edge_index
+        )
 
     preds = similarities.argmax(dim=1)
     return loss, loss_proto.item(), loss_aux.item(), preds, query_data.family_class
@@ -543,7 +620,7 @@ def episodic_finetune(
             f'train_acc={train_acc:.4f}'
         )
 
-        if isinstance(model, (SDLDegreeModel, SDLComplexityModel, SDLWithoutStructureModel)):
+        if isinstance(model, (SDLDegreeModel, SDLComplexityModel, SDLPageRankModel, SDLWithoutStructureModel)):
             logger.info(f'  λa={model.raw_lambda_a.item():.4f}  λb={model.raw_lambda_b.item():.4f}')
         
 
@@ -624,6 +701,20 @@ def main():
                         help='Freeze backbone weights; only train head')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducible episode sampling')
+    parser.add_argument('--flat_fcg', action='store_true',
+                        help='Use FlatFCGBackbone (no CFG GNN) for granular component ablation')
+    parser.add_argument('--whole_graph', action='store_true',
+                        help='Use whole_graph_backbone (instance-level pretraining only) for granular component ablation')
+    parser.add_argument('--set_only', action='store_true',
+                        help='Use set_only_backbone (set-level pretraining only) for granular component ablation')
+    parser.add_argument('--instance_only', action='store_true',
+                        help='Use instance_only_backbone (instance-level pretraining only) for granular component ablation')
+    parser.add_argument('--random_init_backbone', action='store_true',
+                        help='Skip contrastive pretraining entirely: train episodically from a randomly '
+                             'initialized backbone (unfrozen). Isolates the contribution of contrastive '
+                             'pretraining for granular component ablation.')
+    parser.add_argument('--multi_gpu', action='store_true',
+                        help='Offload DiffPool dense aux-loss ops (A_dense, SS^T) to cuda:1 to relieve GPU 0 memory.')
     args = parser.parse_args()
 
     # ---- Seed ----
@@ -636,30 +727,69 @@ def main():
     device = Utils.get_device()
 
     frozen_str = 'frozen' if args.freeze_backbone else 'unfrozen'
-    model_path = Utils.get_episodic_model_path(params, args.variant, args.freeze_backbone)
+
+    if args.flat_fcg:
+        backbone_prefix = 'flat_fcg'
+    elif args.whole_graph:
+        backbone_prefix = 'whole_graph'
+    elif args.set_only:
+        backbone_prefix = 'set_only'
+    elif args.instance_only:
+        backbone_prefix = 'instance_only'
+    elif args.random_init_backbone:
+        backbone_prefix = 'random_init'
+    else:
+        backbone_prefix = None
+
+    variant_key = f'{backbone_prefix}_{args.variant}' if backbone_prefix else args.variant
+    model_path = Utils.get_episodic_model_path(params, variant_key, args.freeze_backbone)
     save_dir   = os.path.dirname(model_path)
     log_path   = os.path.join(save_dir, 'train.log')
-    logger = Utils.setup_logger(f'episodic_train_{args.variant}_{frozen_str}_{params.dataset_split_type.value}', log_path)
+    logger = Utils.setup_logger(f'episodic_train_{variant_key}_{frozen_str}_{params.dataset_split_type.value}', log_path)
 
-    logger.info(f'Config: {params.id}  Variant: {args.variant} Device: {device}')
+    logger.info(f'Config: {params.id}  Variant: {variant_key} Device: {device}')
     logger.info(f'Seed: {args.seed}')
     logger.info(f'Freeze backbone: {args.freeze_backbone}')
     logger.info(f'Dataset split type: {params.dataset_split_type.value}')
 
     # ---- Load pre-trained backbone ----
-    backbone = Backbone(
-        cfg_dim=params.cfg_dim,
-        func_feat_dim=params.func_feat_dim,
-        cfg_hidden_channels=params.cfg_hidden_channels,
-        fcg_hidden_channels=params.fcg_hidden_channels,
-        final_channels=params.final_channels,
-        dropout_value=params.dropout,
-    ).to(device)
+    if args.flat_fcg:
+        backbone = FlatFCGBackbone(
+            func_feat_dim=params.func_feat_dim,
+            fcg_hidden_channels=params.fcg_hidden_channels,
+            final_channels=params.final_channels,
+            dropout_value=params.dropout,
+        ).to(device)
+        backbone_path = Utils.get_flat_fcg_backbone_model_saved_path(params)
+    else:
+        backbone = Backbone(
+            cfg_dim=params.cfg_dim,
+            func_feat_dim=params.func_feat_dim,
+            cfg_hidden_channels=params.cfg_hidden_channels,
+            fcg_hidden_channels=params.fcg_hidden_channels,
+            final_channels=params.final_channels,
+            dropout_value=params.dropout,
+        ).to(device)
+        if args.whole_graph:
+            backbone_path = Utils.get_whole_graph_backbone_model_saved_path(params)
+        elif args.set_only:
+            backbone_path = Utils.get_set_only_backbone_model_saved_path(params)
+        elif args.instance_only:
+            backbone_path = Utils.get_instance_only_backbone_model_saved_path(params)
+        else:
+            backbone_path = Utils.get_backbone_model_saved_path(params)
 
-    backbone_path = Utils.get_backbone_model_saved_path(params)
-    state = torch.load(backbone_path, map_location=device)
-    backbone.load_state_dict(state)
-    logger.info(f'Loaded backbone from {backbone_path}')
+    if args.random_init_backbone:
+        logger.info('[*] Random-init backbone: skipping contrastive-pretrained checkpoint load; '
+                    'training episodically from random initialization')
+        if args.freeze_backbone:
+            logger.warning('[!] --freeze_backbone with --random_init_backbone would train only the head '
+                           'on random features (near-chance control). Ignoring freeze; training unfrozen.')
+            args.freeze_backbone = False
+    else:
+        state = torch.load(backbone_path, map_location=device)
+        backbone.load_state_dict(state)
+        logger.info(f'Loaded backbone from {backbone_path}')
 
     if args.freeze_backbone:
         for p in backbone.parameters():
@@ -669,6 +799,10 @@ def main():
     # ---- Create model ----
     model = create_model(args.variant, backbone, fcg_dim=params.final_channels).to(device)
 
+    if isinstance(model, DiffPoolModel) and args.multi_gpu and torch.cuda.device_count() > 1:
+        model.secondary_device = torch.device('cuda:1')
+        logger.info('[*] DiffPool: dense aux-loss ops offloaded to cuda:1')
+
     # ---- Load datasets ----
     logger.info('Loading datasets...')
     train_ds, val_ds, _ = Utils.get_splits(params)
@@ -677,7 +811,7 @@ def main():
 
     # ---- Fine-tune ----
     accumulation_steps = (
-        10 if args.variant in ('sdl_degree', 'sdl_complexity') and args.freeze_backbone
+        10 if args.variant in ('sdl_degree', 'sdl_complexity', 'sdl_pagerank') and args.freeze_backbone
         else 1
     )
     episodic_finetune(

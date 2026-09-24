@@ -213,7 +213,10 @@ class HiGraphDataset(Dataset):
             fcg_edges = json_data['function_edges']
             function_count = json_data['function_count']
             control_flow_edges = json_data['control_flow_edges']
-            control_flow_edges_map = json.loads(control_flow_edges)
+            control_flow_edges_map = (
+                control_flow_edges if isinstance(control_flow_edges, dict)
+                else json.loads(control_flow_edges)
+            )
 
             # function_names = json_data['function_names']
 

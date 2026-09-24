@@ -192,6 +192,49 @@ def stage1_extract_raw(apk_dirs: list, hash_family: dict, out_path: str, logger)
     return raw
 
 
+def stage2_encode_with_vocab(raw: dict, out_dir: str, vocab: dict, logger):
+    """
+    Encode raw features using an existing vocabulary instead of building a new one.
+    Used for obfuscated APKs so that feature vector positions match the trained encoders.
+    """
+    perm_idx  = {p: i for i, p in enumerate(vocab["perms"])}
+    api_idx   = {a: i for i, a in enumerate(vocab["apis"])}
+    ngram_idx = {ng: i for i, ng in enumerate(vocab["opcodes"])}
+
+    logger.info(f"Encoding with existing vocab: "
+                f"perms={len(perm_idx)}, apis={len(api_idx)}, opcodes={len(ngram_idx)}")
+
+    features = {}
+    for sha, entry in raw.items():
+        perm_vec = np.zeros(len(perm_idx), dtype=np.float32)
+        for p in entry["perms"]:
+            if p in perm_idx:
+                perm_vec[perm_idx[p]] = 1.0
+
+        api_vec = np.zeros(len(api_idx), dtype=np.float32)
+        for a in entry["apis"]:
+            if a in api_idx:
+                api_vec[api_idx[a]] = 1.0
+
+        opc_vec = np.zeros(len(ngram_idx), dtype=np.float32)
+        for ng in entry["opcode_ngrams"]:
+            if ng in ngram_idx:
+                opc_vec[ngram_idx[ng]] = 1.0
+
+        features[sha] = {
+            "family":   entry["family"],
+            "perm_vec": perm_vec,
+            "api_vec":  api_vec,
+            "opc_vec":  opc_vec,
+        }
+
+    feat_path = os.path.join(out_dir, "features.pkl")
+    with open(feat_path, "wb") as f:
+        pickle.dump(features, f)
+    logger.info(f"Encoded features saved -> {feat_path} ({len(features)} samples)")
+    return features
+
+
 def stage2_build_and_encode(raw: dict, out_dir: str, logger,
                             top_perms: int = 57,
                             top_apis: int = 78,
@@ -285,7 +328,14 @@ def main():
                         help="Top-K most frequent API calls to keep (default: 78, matches FAMCF paper).")
     parser.add_argument("--top_ngrams", type=int, default=343,
                         help="Top-K most frequent opcode 3-grams to keep (default: 343, matches FAMCF paper).")
+    parser.add_argument("--existing_vocab", default=None,
+                        help="Path to an existing vocab.pkl. If provided, stage 2 encodes "
+                             "using this vocabulary instead of building a new one from the "
+                             "input corpus. Use this for obfuscated APKs.")
     args = parser.parse_args()
+
+    if args.existing_vocab and args.stage == 1:
+        parser.error("--existing_vocab only applies to stage 2 encoding")
     from src.core.utils import Utils
     project_root = Path(Utils.get_project_root())
     apk_root = Path(args.apk_root) if args.apk_root is not None \
@@ -318,10 +368,16 @@ def main():
         if args.stage == 2:
             with open(raw_path, "rb") as f:
                 raw = pickle.load(f)
-        stage2_build_and_encode(raw, str(out_dir), logger,
-                                top_perms=args.top_perms,
-                                top_apis=args.top_apis,
-                                top_ngrams=args.top_ngrams)
+        if args.existing_vocab:
+            with open(args.existing_vocab, "rb") as f:
+                vocab = pickle.load(f)
+            logger.info(f"Using existing vocab from: {args.existing_vocab}")
+            stage2_encode_with_vocab(raw, str(out_dir), vocab, logger)
+        else:
+            stage2_build_and_encode(raw, str(out_dir), logger,
+                                    top_perms=args.top_perms,
+                                    top_apis=args.top_apis,
+                                    top_ngrams=args.top_ngrams)
 
 
 if __name__ == "__main__":

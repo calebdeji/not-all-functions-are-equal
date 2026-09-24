@@ -2,24 +2,26 @@
 # run_training.sh
 # Full training pipeline in dependency order:
 #   0. Generate splits                (generate_splits.py — must run first)
-#   1. Graph-level instance backbone  (train_whole_graph_backbone.py — NT-Xent on graph embeddings only)
-#   2. Instance + set-level backbone  (train_back_bone.py — NT-Xent on graph + set-level node features)
-#   3. Episodic heads                 (self_attention, sdl_degree, sdl_complexity) — requires step 2
+#   1. Graph-level instance backbone  (src.pretrain.train_whole_graph_backbone — NT-Xent on graph embeddings only)
+#   2. Instance + set-level backbone  (src.pretrain.train_back_bone — NT-Xent on graph + set-level node features)
+#   3. Episodic heads                 (self_attention, sdl_degree, sdl_complexity,
+#                                      sdl_pagerank) — requires step 2
 #   4. FAMCF encoders                 (permission, api_call, opcode)
 #   5. AndroFIM                       (DINO pretrain → fine-tune)
 #
-# Prerequisites for step 5 — run once before this script:
-#   bash run_extract_features.sh --csv <csv> --apk_dir <dir> --name higraph --stage androfim
+# Prerequisites for steps 4-5 — run once before this script:
+#   python -m src.data.extract_famcf_features --apk_root raw_format/higraph --out_dir dataset/higraph/famcf
+#   python -m src.data.apk_to_androFIM_image
 #
 # Usage:
-#   bash run_training.sh                   # full pipeline
-#   bash run_training.sh splits
-#   bash run_training.sh instance_backbone
-#   bash run_training.sh full_backbone
-#   bash run_training.sh episodic
-#   bash run_training.sh famcf
-#   bash run_training.sh androfim
-#   bash run_training.sh fcgat
+#   bash scripts/run_training.sh                   # full pipeline
+#   bash scripts/run_training.sh splits
+#   bash scripts/run_training.sh instance_backbone
+#   bash scripts/run_training.sh full_backbone
+#   bash scripts/run_training.sh episodic
+#   bash scripts/run_training.sh famcf
+#   bash scripts/run_training.sh androfim
+#   bash scripts/run_training.sh fcgat
 
 set -euo pipefail
 
@@ -64,7 +66,7 @@ run_full_backbone() {
 
 # ─── 3. Episodic heads ────────────────────────────────────────────────────────
 run_episodic() {
-    for VARIANT in self_attention sdl_degree sdl_complexity; do
+    for VARIANT in self_attention sdl_degree sdl_complexity sdl_pagerank; do
         echo "========================================"
         echo "[3] Episodic — ${VARIANT}  [${CONFIG}]"
         echo "========================================"

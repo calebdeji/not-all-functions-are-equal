@@ -139,7 +139,8 @@ def get_args_parser():
         help='Base/val/novel family ratios for no_overlap split.')
     parser.add_argument('--config', default='trial_config_v3', type=str,
         help='HiGraph config ID whose split files to use (e.g. trial_config_v3). '
-             'Determines the path: dataset_config_split/{dataset}/{config}/split.json.')
+             'Determines the path: dataset_config_split/{dataset}/{config}/'
+             '{no_overlap,temporal}_split.json (HiGraph) or split.json (flat datasets).')
     return parser
 
 
@@ -175,12 +176,12 @@ def build_pretrain_dataset(args, transform):
     if dataset_name in _FLAT_DATASET_NAMES:
         split_file = config_dir / "split.json"
     else:
-        split_file = config_dir / "split.json"
+        split_file = config_dir / f"{args.split_type}_split.json"
 
     if not split_file.exists():
         raise FileNotFoundError(
             f"Split file not found: {split_file}\n"
-            f"Run `python src/generate_splits.py --config {args.config}` first."
+            f"Run `python -m src.data.generate_splits --config {args.config}` first."
         )
 
     df = pd.read_csv(manifest)
@@ -188,7 +189,10 @@ def build_pretrain_dataset(args, transform):
 
     with open(split_file) as f:
         split = json.load(f)
-    df = df[df["family"].isin(set(split["base"]))]
+    if "train_hashes" in split:  # temporal split — filter by sha256
+        df = df[df["sha256"].isin(set(split["train_hashes"]))]
+    else:
+        df = df[df["family"].isin(set(split["base"]))]
 
     if dataset_name in _FLAT_DATASET_NAMES:
         paths = [str(img_root / "images" / Path(row.image_path).name) for _, row in df.iterrows()]

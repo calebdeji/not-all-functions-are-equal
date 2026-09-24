@@ -233,18 +233,31 @@ def _load_pkl_backend(data_dir: str, feature_type: str, logger,
         samples_csv = os.path.join(truth_dir, f"labelled_samples_with_family_{dataset_name}_apks.csv")
 
     # ── Load family split ─────────────────────────────────────────────────────
+    hash_filter_train = None
+    hash_filter_val   = None
     if split_json and os.path.exists(split_json):
         with open(split_json) as f:
             split = json.load(f)
-        train_fams = set(split["base"])
-        val_fams   = set(split["val"])
-        logger.info(f"Splits from JSON — base: {len(train_fams)}, val: {len(val_fams)}")
+        if "train_hashes" in split:  # temporal split — filter by sha256
+            hash_filter_train = set(split["train_hashes"])
+            hash_filter_val   = set(split["val_hashes"])
+            df_tmp = pd.read_csv(samples_csv)
+            df_tmp["family"] = df_tmp["family"].str.lower().str.strip()
+            hcol = "sha256" if "sha256" in df_tmp.columns else "hash"
+            train_fams = set(df_tmp[df_tmp[hcol].isin(hash_filter_train)]["family"].tolist())
+            val_fams   = set(df_tmp[df_tmp[hcol].isin(hash_filter_val)]["family"].tolist())
+            logger.info(f"Temporal hashes — train: {len(hash_filter_train)}, val: {len(hash_filter_val)}")
+            logger.info(f"Derived families — train: {len(train_fams)}, val: {len(val_fams)}")
+        else:
+            train_fams = set(split["base"])
+            val_fams   = set(split["val"])
+            logger.info(f"Splits from JSON — base: {len(train_fams)}, val: {len(val_fams)}")
     else:
         train_fams, val_fams, _ = get_family_splits(samples_csv)
         logger.info(f"Splits (random 60/20/20) — train: {len(train_fams)}, val: {len(val_fams)}")
 
-    train_ds = FAMCFDataset(samples_csv, features_pkl, train_fams, family_to_idx)
-    val_ds   = FAMCFDataset(samples_csv, features_pkl, val_fams,   family_to_idx)
+    train_ds = FAMCFDataset(samples_csv, features_pkl, train_fams, family_to_idx, hash_filter=hash_filter_train)
+    val_ds   = FAMCFDataset(samples_csv, features_pkl, val_fams,   family_to_idx, hash_filter=hash_filter_val)
     logger.info(f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}")
 
     return train_ds, val_ds, input_dim

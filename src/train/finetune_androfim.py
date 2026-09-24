@@ -169,6 +169,35 @@ class AndroFIMBaseDataset(Dataset):
         ])
         return obj
 
+    @classmethod
+    def from_hashes(cls, manifest_path: Path, hash_filter: set,
+                    img_root: Path = None, flat: bool = False) -> 'AndroFIMBaseDataset':
+        """Construct dataset filtered by sha256 hashes (temporal split)."""
+        obj = cls.__new__(cls)
+        df = pd.read_csv(manifest_path)
+        df = df[df["sha256"].isin(hash_filter)].reset_index(drop=True)
+
+        fams = sorted(df["family"].unique().tolist())
+        obj.family_to_idx = {f: i for i, f in enumerate(fams)}
+        obj.n_families    = len(fams)
+
+        if img_root is not None:
+            if flat:
+                obj.paths = [str(img_root / "images" / Path(row.image_path).name) for _, row in df.iterrows()]
+            else:
+                obj.paths = [str(img_root / str(row.year) / Path(row.image_path).name) for _, row in df.iterrows()]
+        else:
+            obj.paths = df["image_path"].tolist()
+
+        obj.labels = [obj.family_to_idx[f] for f in df["family"].tolist()]
+        obj.transform = transforms.Compose([
+            transforms.Resize((200, 200)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225]),
+        ])
+        return obj
+
     def __len__(self):
         return len(self.paths)
 
@@ -258,17 +287,21 @@ def main():
     if args.dataset in _FLAT_DATASET_NAMES:
         split_file = config_dir / "split.json"
     else:
-        split_file = config_dir / "split.json"
-
-    
+        split_file = config_dir / f"{split_type}_split.json"
 
     flat = args.dataset in _FLAT_DATASET_NAMES
 
-    split = load_split(manifest, split_file, args.split_seed, args.split_ratios)
-    logger.info(f"no_overlap split: base={len(split['base'])} families, "
-                f"val={len(split['val'])}, novel={len(split['novel'])}")
-    dataset      = AndroFIMBaseDataset.from_families(manifest, split["base"], img_root=img_root, flat=flat)
-    
+    if split_type == "temporal":
+        split = load_split(manifest, split_file, args.split_seed, args.split_ratios)
+        train_hash_set = set(split["train_hashes"])
+        logger.info(f"temporal split: train_hashes={len(train_hash_set)}")
+        dataset = AndroFIMBaseDataset.from_hashes(manifest, train_hash_set, img_root=img_root, flat=flat)
+    else:
+        split = load_split(manifest, split_file, args.split_seed, args.split_ratios)
+        logger.info(f"no_overlap split: base={len(split['base'])} families, "
+                    f"val={len(split['val'])}, novel={len(split['novel'])}")
+        dataset = AndroFIMBaseDataset.from_families(manifest, split["base"], img_root=img_root, flat=flat)
+
     
     loader  = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=True,
