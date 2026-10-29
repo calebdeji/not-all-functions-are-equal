@@ -4,9 +4,9 @@ for CONFIG in "${CONFIGS[@]}"; do
     echo "========================================"
     echo "Evaluating all models  [$CONFIG]"
     echo "========================================"
-    python src/episodic_evaluate.py \
+    python -m src.eval.episodic_evaluate \
         --config "$CONFIG" \
         --n_query 15 --n_episodes 500 \
-        --skip_episode_train --n_shots 1 5 \
+        --n_shots 1 5 \
         --ablation_only --export_weights_dir metric_data_ablation_temp/
 done

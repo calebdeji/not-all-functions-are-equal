@@ -1,7 +1,7 @@
 /hi_graph
 /.venv
 /local
-/src/__pycache__
+__pycache__/
 /models
 /.idea
 .env
@@ -11,3 +11,5 @@
 /dataset
 /raw_format
 /trained_models
+# Training progress markers written by scripts/run_*.sh
+*_progress.txt

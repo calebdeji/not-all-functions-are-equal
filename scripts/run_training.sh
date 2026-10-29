@@ -2,24 +2,26 @@
 # run_training.sh
 # Full training pipeline in dependency order:
 #   0. Generate splits                (generate_splits.py — must run first)
-#   1. Graph-level instance backbone  (train_whole_graph_backbone.py — NT-Xent on graph embeddings only)
-#   2. Instance + set-level backbone  (train_back_bone.py — NT-Xent on graph + set-level node features)
-#   3. Episodic heads                 (self_attention, sdl_degree, sdl_complexity) — requires step 2
+#   1. Graph-level instance backbone  (src.pretrain.train_whole_graph_backbone — NT-Xent on graph embeddings only)
+#   2. Instance + set-level backbone  (src.pretrain.train_back_bone — NT-Xent on graph + set-level node features)
+#   3. Episodic heads                 (self_attention, sdl_degree, sdl_complexity,
+#                                      sdl_pagerank) — requires step 2
 #   4. FAMCF encoders                 (permission, api_call, opcode)
 #   5. AndroFIM                       (DINO pretrain → fine-tune)
 #
-# Prerequisites for step 5 — run once before this script:
-#   bash run_extract_features.sh --csv <csv> --apk_dir <dir> --name higraph --stage androfim
+# Prerequisites for steps 4-5 — run once before this script:
+#   python -m src.data.extract_famcf_features --apk_root raw_format/higraph --out_dir dataset/higraph/famcf
+#   python -m src.data.apk_to_androFIM_image
 #
 # Usage:
-#   bash run_training.sh                   # full pipeline
-#   bash run_training.sh splits
-#   bash run_training.sh instance_backbone
-#   bash run_training.sh full_backbone
-#   bash run_training.sh episodic
-#   bash run_training.sh famcf
-#   bash run_training.sh androfim
-#   bash run_training.sh fcgat
+#   bash scripts/run_training.sh                   # full pipeline
+#   bash scripts/run_training.sh splits
+#   bash scripts/run_training.sh instance_backbone
+#   bash scripts/run_training.sh full_backbone
+#   bash scripts/run_training.sh episodic
+#   bash scripts/run_training.sh famcf
+#   bash scripts/run_training.sh androfim
+#   bash scripts/run_training.sh fcgat
 
 set -euo pipefail
 
@@ -37,7 +39,7 @@ run_splits() {
     echo "========================================"
     echo "[0] Generate splits  [${CONFIG}]"
     echo "========================================"
-    python src/generate_splits.py \
+    python -m src.data.generate_splits \
         --config "$CONFIG"
     echo "--- Done ---"
 }
@@ -47,7 +49,7 @@ run_instance_backbone() {
     echo "========================================"
     echo "[1] Graph-level instance backbone  [${CONFIG}]"
     echo "========================================"
-    python src/train_whole_graph_backbone.py \
+    python -m src.pretrain.train_whole_graph_backbone \
         --config       "$CONFIG"
     echo "--- Done ---"
 }
@@ -57,18 +59,18 @@ run_full_backbone() {
     echo "========================================"
     echo "[2] Instance + set-level backbone  [${CONFIG}]"
     echo "========================================"
-    python src/train_back_bone.py \
+    python -m src.pretrain.train_back_bone \
         --config       "$CONFIG"
     echo "--- Done ---"
 }
 
 # ─── 3. Episodic heads ────────────────────────────────────────────────────────
 run_episodic() {
-    for VARIANT in self_attention sdl_degree sdl_complexity; do
+    for VARIANT in self_attention sdl_degree sdl_complexity sdl_pagerank; do
         echo "========================================"
         echo "[3] Episodic — ${VARIANT}  [${CONFIG}]"
         echo "========================================"
-        python src/episodic_train.py \
+        python -m src.train.episodic_train \
             --config       "$CONFIG" \
             --variant      "$VARIANT" \
             --seed         42
@@ -83,7 +85,7 @@ run_famcf() {
         echo "========================================"
         echo "[4] FAMCF — ${FT}  [${CONFIG}]"
         echo "========================================"
-        python src/train_famcf.py \
+        python -m src.train.train_famcf \
             --config       "$CONFIG" \
             --data_dir     "dataset/${DATASET}" \
             --feature_type "$FT"
@@ -98,7 +100,7 @@ run_androfim() {
     echo "========================================"
     python -m torch.distributed.launch \
         --nproc_per_node="$GPUS" \
-        src/main_dino.py \
+        --module src.pretrain.main_dino \
         --arch                resnet12 \
         --manifest            "$MANIFEST" \
         --config              "$CONFIG" \
@@ -116,7 +118,7 @@ run_androfim() {
     echo "========================================"
     echo "[5b] AndroFIM fine-tune  [${CONFIG}]"
     echo "========================================"
-    python src/finetune_androfim.py \
+    python -m src.train.finetune_androfim \
         --dataset     "$DATASET" \
         --manifest    "$MANIFEST" \
         --config      "$CONFIG" \
@@ -134,7 +136,7 @@ run_fcgat() {
     echo "========================================"
     echo "[6] Adapted FCGAT  [${CONFIG}]"
     echo "========================================"
-    python src/train_fcgat.py \
+    python -m src.train.train_fcgat \
         --config       "$CONFIG"
     echo "--- Done ---"
 }

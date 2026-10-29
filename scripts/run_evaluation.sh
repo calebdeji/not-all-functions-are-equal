@@ -9,7 +9,7 @@ for CONFIG in "${CONFIGS[@]}"; do
     echo "========================================"
     echo "Evaluating all models  [$CONFIG]"
     echo "========================================"
-    python src/episodic_evaluate.py \
+    python -m src.eval.episodic_evaluate \
         --config "$CONFIG" \
         --n_query 15 --n_episodes 500 \
         --n_shots 1 5 \
